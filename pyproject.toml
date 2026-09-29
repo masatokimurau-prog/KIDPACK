@@ -16,7 +16,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+vacuum = ["pyserial"]
+dev = ["pytest", "pyserial"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
