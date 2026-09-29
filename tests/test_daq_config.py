@@ -1,6 +1,8 @@
+from pathlib import Path
+
 import pytest
 
-from kidpack.daq.config import build_parser, config_from_args
+from kidpack.daq.config import build_parser, config_from_args, default_output_dir
 
 REQUIRED = ['--run-number', '3', '--events-per-file', '1000', '--num-files', '2']
 
@@ -96,6 +98,19 @@ def test_random_trigger_defaults_to_once_per_second():
 def test_random_trigger_option_conflicts(bad):
     with pytest.raises(SystemExit):
         parse(*bad)
+
+
+def test_runs_are_saved_under_kidpack_data_by_default():
+    out = Path(default_output_dir())
+    assert out.name == 'data' and out.is_absolute()
+    assert (out.parent / 'pyproject.toml').is_file()  # <checkout>/data, whatever the cwd
+    assert parse().output_dir == str(out)
+
+
+def test_default_output_dir_does_not_depend_on_the_current_directory(tmp_path, monkeypatch):
+    expected = default_output_dir()
+    monkeypatch.chdir(tmp_path)
+    assert default_output_dir() == expected == parse().output_dir
 
 
 def test_summary_path_defaults_to_output_dir():

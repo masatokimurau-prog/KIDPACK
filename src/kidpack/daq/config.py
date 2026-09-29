@@ -8,6 +8,7 @@ import os
 import re
 import sys
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Optional
 
 VERTICAL_COUPLINGS = ('dc', 'ac', 'gnd')
@@ -19,6 +20,18 @@ BACKENDS = ('niscope', 'simulator')
 DEFAULT_TIME_WINDOW = 2e-6  # s
 DEFAULT_SG_RESOURCE = 'PXI1Slot3'
 SUMMARY_FILE_NAME = 'run_summary.txt'
+
+
+def default_output_dir():
+    """``KIDPACK/data`` when running from a source checkout, else ``./data``.
+
+    Anchoring to the checkout keeps new runs out of unrelated directories
+    (e.g. an old ``KID/data``) whatever the current directory is.
+    """
+    root = Path(__file__).resolve().parents[3]
+    if (root / 'pyproject.toml').is_file() and (root / 'src' / 'kidpack').is_dir():
+        return str(root / 'data')
+    return 'data'
 
 
 @dataclass
@@ -54,7 +67,7 @@ class DaqConfig:
     run_number: int
     events_per_file: int
     num_files: int
-    output_dir: str = '.'
+    output_dir: str = field(default_factory=default_output_dir)
     summary_file: Optional[str] = None
     condition: str = ''
     backend: str = 'niscope'
@@ -150,7 +163,8 @@ def build_parser():
                    help='free-text measurement condition (temperature, bias, ...), '
                         'recorded in the run summary and the YAML')
     g.add_argument('--output-dir', default=_D.output_dir,
-                   help='directory in which run_XX/ is created (default: current directory)')
+                   help='directory in which run_XX/ is created '
+                        f"(default: {_D.output_dir.replace('%', '%%')})")
     g.add_argument('--summary-file', default=None, metavar='PATH',
                    help=f'run summary text file, one line appended per run '
                         f'(default: OUTPUT_DIR/{SUMMARY_FILE_NAME})')

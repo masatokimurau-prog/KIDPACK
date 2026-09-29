@@ -67,10 +67,10 @@ def test_full_run_layout_and_contract(tmp_path):
     run_dir = tmp_path / 'run_07'
     assert result.status == 'completed' and result.exit_code == 0
     assert result.total_events == 15 and result.files_written == 3
-    assert sorted(os.listdir(run_dir)) == ['config', 'data', 'logs']
+    assert sorted(os.listdir(run_dir)) == ['config', 'data']  # no logs/ directory
     assert sorted(os.listdir(run_dir / 'data')) == [f'run07-0{i}.npz' for i in range(3)]
     assert sorted(os.listdir(run_dir / 'config')) == [f'run07-0{i}.yaml' for i in range(3)]
-    assert (run_dir / 'logs' / 'daq.log').stat().st_size > 0
+    assert not [p for p in tmp_path.rglob('*') if p.suffix == '.log']  # no log file anywhere
 
     run_starts = set()
     for i in range(3):

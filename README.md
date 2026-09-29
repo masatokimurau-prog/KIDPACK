@@ -28,10 +28,14 @@ kidpack-daq --run-number 12 --events-per-file 1000 --num-files 5 \
 
 - `--run-number`, `--events-per-file` and `--num-files` are required. Ctrl-C
   stops early and keeps the data acquired so far (exit code 130).
-- Output: `run_XX/{data/runXX-YY.npz, config/runXX-YY.yaml, logs/daq.log}`
-  under `--output-dir`. An existing run number is never reused.
+- Output: `run_XX/{data/runXX-YY.npz, config/runXX-YY.yaml}` under
+  `--output-dir` (default `KIDPACK/data/`, git-ignored, wherever the command is
+  run from; `./data` if not run from a source checkout). No log file is
+  written: progress and errors go to the console, errors also into the YAML.
+  An existing run number is never reused.
 - One line per run (run number, start/stop time, DAQ rate, condition) is
-  appended to `run_summary.txt` (tab-separated) in `--output-dir`.
+  appended to `run_summary.txt` (tab-separated) in `--output-dir`
+  (i.e. `KIDPACK/data/run_summary.txt`, also git-ignored).
 - Signal generator: give `--sg-frequency` and `--sg-power` to let the DAQ set
   and start it; without them it is not touched. It needs the site-specific
   `nirfsg` module (`PXIe_5654`); do not `pip install nirfsg`.
@@ -48,4 +52,5 @@ kidpack-daq --run-number 12 --events-per-file 1000 --num-files 5 \
 src/kidpack/       package source (daq/: config, runner, writer, backends/)
 scripts/           stand-alone measurement scripts (VacuumGauge/read.py)
 tests/             pytest tests
+data/              DAQ output (created by kidpack-daq, not tracked by git)
 ```

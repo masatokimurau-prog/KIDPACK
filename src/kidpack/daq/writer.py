@@ -3,7 +3,9 @@
     run_XX/
       data/runXX-YY.npz      raw waveforms + minimal timing/identity metadata
       config/runXX-YY.yaml   settings, times and status of that file
-      logs/daq.log
+
+No log file is written; progress and errors go to the console (errors are
+also recorded in the YAML of the affected file).
 """
 import os
 
@@ -23,7 +25,6 @@ class RunWriter:
         self.run_dir = os.path.join(cfg.output_dir, f'run_{cfg.run_number:02d}')
         self.data_dir = os.path.join(self.run_dir, 'data')
         self.config_dir = os.path.join(self.run_dir, 'config')
-        self.log_path = os.path.join(self.run_dir, 'logs', 'daq.log')
         self._version = software_version()
 
     def check_new(self):
@@ -33,7 +34,7 @@ class RunWriter:
 
     def create(self):
         self.check_new()
-        for directory in (self.data_dir, self.config_dir, os.path.dirname(self.log_path)):
+        for directory in (self.data_dir, self.config_dir):
             os.makedirs(directory)
 
     def stem(self, file_number):

@@ -32,20 +32,17 @@ class RunResult:
 
 
 @contextlib.contextmanager
-def _log_to(path):
-    formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-    handlers = [logging.FileHandler(path, encoding='utf-8'), logging.StreamHandler()]
+def _log_to_console():
+    """Show progress on stderr for the duration of a run (nothing is written to disk)."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
     old_level = log.level
     log.setLevel(logging.INFO)
-    for handler in handlers:
-        handler.setFormatter(formatter)
-        log.addHandler(handler)
+    log.addHandler(handler)
     try:
         yield
     finally:
-        for handler in handlers:
-            log.removeHandler(handler)
-            handler.close()
+        log.removeHandler(handler)
         log.setLevel(old_level)
 
 
@@ -88,7 +85,7 @@ class _Run:
         status, error = 'completed', None
         run_stop_ns = None
 
-        with _log_to(self.writer.log_path):
+        with _log_to_console():
             log.info('run %02d start: %d file(s) x %d events -> %s',
                      cfg.run_number, cfg.num_files, cfg.events_per_file, self.writer.run_dir)
             log.info('condition: %s', cfg.condition or '(none)')
