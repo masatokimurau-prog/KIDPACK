@@ -4,6 +4,7 @@ import time
 import numpy as np
 
 from kidpack.daq.backends.base import Event, ScopeBackend, SgBackend
+from kidpack.daq.backends.pacing import IntervalPacer
 
 
 class SimulatedScope(ScopeBackend):
@@ -13,6 +14,8 @@ class SimulatedScope(ScopeBackend):
     def __init__(self, cfg, seed=None):
         self._cfg = cfg
         self._rng = np.random.default_rng(seed)
+        self._pacer = (IntervalPacer(cfg.trigger.interval)
+                       if cfg.trigger.mode == 'random' else None)
 
     def configure(self):
         return {'sample_rate': float(self._cfg.sample_rate),
@@ -20,6 +23,8 @@ class SimulatedScope(ScopeBackend):
                 'simulated': True}
 
     def acquire(self):
+        if self._pacer is not None:
+            self._pacer.wait()  # like the hardware backend: one trigger per interval
         n = self._cfg.npts
         x = np.arange(n) - int(n * self._cfg.ref_position / 100)
         pulse = np.exp(-np.clip(x, 0, None) / 500.0) * (x >= 0) * 5e-3

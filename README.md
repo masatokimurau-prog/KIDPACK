@@ -35,6 +35,11 @@ kidpack-daq --run-number 12 --events-per-file 1000 --num-files 5 \
 - Signal generator: give `--sg-frequency` and `--sg-power` to let the DAQ set
   and start it; without them it is not touched. It needs the site-specific
   `nirfsg` module (`PXIe_5654`); do not `pip install nirfsg`.
+- Random trigger: `--random-trigger` makes the DAQ issue a software trigger
+  itself, once per `--random-trigger-interval` seconds (default 1), instead of
+  waiting for the edge trigger (`--trigger-*` options cannot be combined with
+  it). Use it for unbiased noise/baseline waveforms. The interval is fixed and
+  drift-free; `timestamp_unix_ns` is the time the trigger was sent.
 - `--backend simulator` runs without any hardware.
 
 ## Layout

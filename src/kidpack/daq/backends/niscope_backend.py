@@ -10,12 +10,18 @@ import time
 import numpy as np
 
 from kidpack.daq.backends.base import DaqError, Event, ScopeBackend
+from kidpack.daq.backends.pacing import IntervalPacer
 
 log = logging.getLogger('kidpack.daq')
 
 
 def _enum(enum_class, name):
     return getattr(enum_class, name.upper())
+
+
+#: extra time granted after arming before a software trigger is sent, on top of
+#: the pre-trigger duration (a reference trigger sent earlier may be ignored)
+ARM_MARGIN_S = 1e-3
 
 
 class NiScopeBackend(ScopeBackend):
@@ -27,6 +33,13 @@ class NiScopeBackend(ScopeBackend):
         self._niscope = niscope
         self._cfg = cfg
         self._session = niscope.Session(cfg.resource)
+        self._pacer = None
+        if cfg.trigger.mode == 'random':
+            self._pacer = IntervalPacer(cfg.trigger.interval)
+            self._min_arm_s = (cfg.npts / cfg.sample_rate * cfg.ref_position / 100
+                               + ARM_MARGIN_S)
+            self.timestamp_source = ('host clock (time.time_ns) read immediately after the '
+                                     'software trigger is sent (fixed-interval random trigger)')
 
     def configure(self):
         cfg, s, ni = self._cfg, self._session, self._niscope
@@ -45,10 +58,13 @@ class NiScopeBackend(ScopeBackend):
             min_sample_rate=cfg.sample_rate, min_num_pts=cfg.npts,
             ref_position=cfg.ref_position, num_records=1, enforce_realtime=True)
 
-        s.configure_trigger_edge(
-            trigger_source=cfg.trigger.source, level=cfg.trigger.level,
-            trigger_coupling=_enum(ni.TriggerCoupling, cfg.trigger.coupling),
-            slope=_enum(ni.TriggerSlope, cfg.trigger.slope))
+        if self._pacer is not None:
+            s.configure_trigger_software()
+        else:
+            s.configure_trigger_edge(
+                trigger_source=cfg.trigger.source, level=cfg.trigger.level,
+                trigger_coupling=_enum(ni.TriggerCoupling, cfg.trigger.coupling),
+                slope=_enum(ni.TriggerSlope, cfg.trigger.slope))
 
         return self._read_back()
 
@@ -72,11 +88,28 @@ class NiScopeBackend(ScopeBackend):
                                      'input_impedance', 'max_input_frequency')}
         return actual
 
+    def _send_random_trigger(self):
+        """Wait for the next tick of the fixed-interval schedule, then trigger.
+
+        Called while the acquisition is armed, so the pre-trigger samples are
+        already being taken during the wait. Returns the trigger time in ns.
+        """
+        armed = time.monotonic()
+        self._pacer.wait()
+        remaining = self._min_arm_s - (time.monotonic() - armed)
+        if remaining > 0:
+            time.sleep(remaining)
+        self._session.send_software_trigger_edge(self._niscope.WhichTrigger.REFERENCE)
+        return time.time_ns()
+
     def acquire(self):
         npts = self._cfg.npts
         with self._session.initiate():
+            if self._pacer is not None:
+                timestamp_ns = self._send_random_trigger()
             waveforms = self._session.channels[0, 1].fetch(timeout=self._cfg.fetch_timeout)
-            timestamp_ns = time.time_ns()
+            if self._pacer is None:
+                timestamp_ns = time.time_ns()
         ch0, ch1 = waveforms[0].samples, waveforms[1].samples
         if len(ch0) < npts or len(ch1) < npts:
             raise DaqError(f'fetched {len(ch0)}/{len(ch1)} samples, expected at least {npts}')

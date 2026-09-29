@@ -77,8 +77,7 @@ class RunWriter:
             'npts': cfg.npts,
             'sample_rate': float(sample_rate),
             'ref_position': float(ref_position),
-            'trigger': {'source': cfg.trigger.source, 'level': cfg.trigger.level,
-                        'slope': cfg.trigger.slope, 'coupling': cfg.trigger.coupling},
+            'trigger': _trigger(cfg.trigger),
             'channels': {
                 'ch0': {**_channel(cfg.ch0), 'impedance': cfg.impedance, 'bandwidth': cfg.bandwidth},
                 'ch1': {**_channel(cfg.ch1), 'impedance': cfg.impedance, 'bandwidth': cfg.bandwidth},
@@ -102,6 +101,13 @@ class RunWriter:
                       lambda f: yaml.safe_dump(document, f, sort_keys=False, allow_unicode=True),
                       'w')
         return npz_path
+
+
+def _trigger(t):
+    if t.mode == 'random':
+        return {'mode': 'random', 'source': 'software', 'interval_s': t.interval}
+    return {'mode': 'edge', 'source': t.source, 'level': t.level,
+            'slope': t.slope, 'coupling': t.coupling}
 
 
 def _channel(ch):

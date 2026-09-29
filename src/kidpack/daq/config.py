@@ -13,6 +13,7 @@ from typing import Optional
 VERTICAL_COUPLINGS = ('dc', 'ac', 'gnd')
 TRIGGER_COUPLINGS = ('lf_reject', 'hf_reject', 'dc', 'ac', 'ac_plus_hf_reject')
 TRIGGER_SLOPES = ('positive', 'negative')
+TRIGGER_MODES = ('edge', 'random')
 BACKENDS = ('niscope', 'simulator')
 
 DEFAULT_TIME_WINDOW = 2e-6  # s
@@ -33,6 +34,11 @@ class TriggerConfig:
     level: float = 2.2  # V
     slope: str = 'positive'
     coupling: str = 'lf_reject'
+    # 'edge': wait for the trigger described by the fields above.
+    # 'random': the DAQ itself issues a software trigger every `interval`
+    # seconds (unbiased noise/baseline samples); the edge settings are unused.
+    mode: str = 'edge'
+    interval: float = 1.0  # s between random triggers
 
 
 @dataclass
@@ -92,6 +98,9 @@ class DaqConfig:
             need(ch.vertical_range > 0, f'--{name}-range must be > 0')
             need(ch.coupling in VERTICAL_COUPLINGS,
                  f'--{name}-coupling must be one of {VERTICAL_COUPLINGS}')
+        need(self.trigger.mode in TRIGGER_MODES,
+             f'trigger mode must be one of {TRIGGER_MODES}')
+        need(self.trigger.interval > 0, '--random-trigger-interval must be > 0')
         need(self.trigger.slope in TRIGGER_SLOPES,
              f'--trigger-slope must be one of {TRIGGER_SLOPES}')
         need(self.trigger.coupling in TRIGGER_COUPLINGS,
@@ -178,7 +187,15 @@ def build_parser():
     g.add_argument('--bandwidth', type=float, default=_D.bandwidth, metavar='HZ',
                    help='max input frequency of both channels, -1 = full (default: %(default)g)')
 
-    g = p.add_argument_group('trigger')
+    g = p.add_argument_group('trigger',
+                             'Default: wait for an edge trigger (--trigger-source/level/slope/'
+                             'coupling). With --random-trigger the DAQ instead issues a '
+                             'software trigger itself, at a fixed interval.')
+    g.add_argument('--random-trigger', action='store_true',
+                   help='issue a software trigger every --random-trigger-interval seconds '
+                        'instead of waiting for an edge trigger')
+    g.add_argument('--random-trigger-interval', type=float, default=None, metavar='S',
+                   help=f'seconds between random triggers (default: {_D.trigger.interval:g})')
     g.add_argument('--trigger-source', default=_D.trigger.source,
                    help="trigger source, e.g. VAL_EXTERNAL or a channel name (default: %(default)s)")
     g.add_argument('--trigger-level', type=float, default=_D.trigger.level, metavar='V',
@@ -209,6 +226,18 @@ def config_from_args(args, parser=None):
         window = DEFAULT_TIME_WINDOW if args.time_window is None else args.time_window
         npts = int(round(args.sample_rate * window))
 
+    edge_options = ((args.trigger_source, _D.trigger.source), (args.trigger_level, _D.trigger.level),
+                    (args.trigger_slope, _D.trigger.slope),
+                    (args.trigger_coupling, _D.trigger.coupling))
+    if args.random_trigger:
+        if any(value != default for value, default in edge_options):
+            parser.error('--trigger-source/level/slope/coupling cannot be combined with '
+                         '--random-trigger')
+    elif args.random_trigger_interval is not None:
+        parser.error('--random-trigger-interval requires --random-trigger')
+    trigger_interval = (_D.trigger.interval if args.random_trigger_interval is None
+                        else args.random_trigger_interval)
+
     sg = None
     if args.sg_frequency is not None or args.sg_power is not None:
         if args.sg_frequency is None or args.sg_power is None:
@@ -235,8 +264,11 @@ def config_from_args(args, parser=None):
         fetch_timeout=args.fetch_timeout,
         ch0=ChannelConfig(args.ch0_range, args.ch0_coupling, args.ch0_offset),
         ch1=ChannelConfig(args.ch1_range, args.ch1_coupling, args.ch1_offset),
-        trigger=TriggerConfig(args.trigger_source, args.trigger_level,
-                              args.trigger_slope, args.trigger_coupling),
+        trigger=TriggerConfig(
+            mode='random' if args.random_trigger else 'edge',
+            source=args.trigger_source, level=args.trigger_level,
+            slope=args.trigger_slope, coupling=args.trigger_coupling,
+            interval=trigger_interval),
         sg=sg,
     )
     try:
