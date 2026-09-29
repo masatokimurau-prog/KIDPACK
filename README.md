@@ -46,10 +46,29 @@ kidpack-daq --run-number 12 --events-per-file 1000 --num-files 5 \
   drift-free; `timestamp_unix_ns` is the time the trigger was sent.
 - `--backend simulator` runs without any hardware.
 
+## Online check
+
+`kidpack-monitor` (or `python -m kidpack.monitor`) writes `pc1.png` (IQ plane)
+and `pc2.png` (I, Q and the projected waveform) for 16 events in a 4x4 grid,
+the same figures as `main_singlefile` of `analysis/ana_forJPS.py`. The data is
+only read, never modified.
+
+```bash
+kidpack-monitor                          # newest file under KIDPACK/data/, PNGs in the current directory
+kidpack-monitor path/to/run12-03.npz --output-dir /tmp/check
+kidpack-monitor --rebin 4 --alpha --stride 2
+```
+
+- Events shown: the first 16 of the file (`--stride K`: every K-th; the old
+  macro used 2).
+- Pedestal: mean over the pre-trigger samples per event (`--alpha`: the first
+  100 ns). `--rebin N` averages N samples before the peak is located.
+
 ## Layout
 
 ```
-src/kidpack/       package source (daq/: config, runner, writer, backends/)
+src/kidpack/       package source (daq/: config, runner, writer, backends/;
+                   monitor/: online check; rawdata.py: raw-file reader)
 scripts/           stand-alone measurement scripts (VacuumGauge/read.py)
 tests/             pytest tests
 data/              DAQ output (created by kidpack-daq, not tracked by git)

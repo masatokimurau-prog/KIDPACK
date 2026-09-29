@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 kidpack-daq = "kidpack.daq.cli:main"
+kidpack-monitor = "kidpack.monitor.cli:main"
 
 [project.optional-dependencies]
 # NI-SCOPE driver bindings for the DAQ PC. The signal generator needs the
