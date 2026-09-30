@@ -61,7 +61,7 @@ class RunWriter:
         )
         stem = self.stem(file_number)
         npz_path = os.path.join(self.data_dir, f'{stem}.npz')
-        _atomic_write(npz_path, lambda f: np.savez(f, **arrays), 'wb')
+        atomic_write(npz_path, lambda f: np.savez(f, **arrays), 'wb')
 
         document = {
             'run_number': cfg.run_number,
@@ -98,7 +98,7 @@ class RunWriter:
             'command_line': self.command_line,
         }
         yaml_path = os.path.join(self.config_dir, f'{stem}.yaml')
-        _atomic_write(yaml_path,
+        atomic_write(yaml_path,
                       lambda f: yaml.safe_dump(document, f, sort_keys=False, allow_unicode=True),
                       'w')
         return npz_path
@@ -115,7 +115,7 @@ def _channel(ch):
     return {'vertical_range': ch.vertical_range, 'coupling': ch.coupling, 'offset': ch.offset}
 
 
-def _atomic_write(path, write, mode):
+def atomic_write(path, write, mode):
     """Write to a temporary file and rename, so a crash never leaves a half-written file."""
     tmp = path + '.tmp'
     kwargs = {} if 'b' in mode else {'encoding': 'utf-8'}

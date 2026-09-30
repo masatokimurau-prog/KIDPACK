@@ -125,7 +125,7 @@ class DaqConfig:
 _D = DaqConfig(run_number=0, events_per_file=1, num_files=1)
 
 
-class _Parser(argparse.ArgumentParser):
+class KidParser(argparse.ArgumentParser):
     """argparse accepts -1 and -0.014 as values but mistakes -8e-5 for an option.
 
     Voltages such as ``--trigger-level -8e-5`` are common here, so a negative
@@ -147,7 +147,7 @@ class _Parser(argparse.ArgumentParser):
 
 
 def build_parser():
-    p = _Parser(
+    p = KidParser(
         prog='kidpack-daq',
         description='Acquire KID waveforms with an NI-SCOPE digitizer '
                     '(exit code: 0 completed, 130 stopped with Ctrl-C, 1 error).')

@@ -6,7 +6,7 @@ from kidpack.daq.timeutil import iso_local
 HEADER = ('run_number', 'start_time', 'stop_time', 'daq_rate_hz', 'condition')
 
 
-def _one_line(text):
+def one_line(text):
     return str(text).replace('\t', ' ').replace('\r', ' ').replace('\n', ' ')
 
 
@@ -20,7 +20,7 @@ def append_run_summary(path, run_number, start_ns, stop_ns, daq_rate_hz, conditi
     os.makedirs(directory, exist_ok=True)
     is_new = not os.path.exists(path) or os.path.getsize(path) == 0
     rate = '' if daq_rate_hz is None else f'{daq_rate_hz:.2f}'
-    row = (run_number, iso_local(start_ns), iso_local(stop_ns), rate, _one_line(condition))
+    row = (run_number, iso_local(start_ns), iso_local(stop_ns), rate, one_line(condition))
     with open(path, 'a', encoding='utf-8', newline='') as f:
         if is_new:
             f.write('\t'.join(HEADER) + '\n')

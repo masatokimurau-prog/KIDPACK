@@ -32,18 +32,18 @@ class RunResult:
 
 
 @contextlib.contextmanager
-def _log_to_console():
-    """Show progress on stderr for the duration of a run (nothing is written to disk)."""
+def log_to_console(logger=log):
+    """Show ``logger``'s progress on stderr for the duration of a run (nothing is written to disk)."""
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
-    old_level = log.level
-    log.setLevel(logging.INFO)
-    log.addHandler(handler)
+    old_level = logger.level
+    logger.setLevel(logging.INFO)
+    logger.addHandler(handler)
     try:
         yield
     finally:
-        log.removeHandler(handler)
-        log.setLevel(old_level)
+        logger.removeHandler(handler)
+        logger.setLevel(old_level)
 
 
 def run_daq(cfg, scope, sg=None, writer=None, command_line=None):
@@ -85,7 +85,7 @@ class _Run:
         status, error = 'completed', None
         run_stop_ns = None
 
-        with _log_to_console():
+        with log_to_console():
             log.info('run %02d start: %d file(s) x %d events -> %s',
                      cfg.run_number, cfg.num_files, cfg.events_per_file, self.writer.run_dir)
             log.info('condition: %s', cfg.condition or '(none)')
