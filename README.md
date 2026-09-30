@@ -135,12 +135,22 @@ kidpack-iqplot scan.npz --no-show --save scan.png    # no window, only a PNG
 - The phase is shown continuously (`--wrap` folds it into -pi..pi); `--db`
   shows the magnitude in dB; `--save PNG` also writes the figure.
 
+## Examples for students
+
+`examples/` has short, stand-alone macros (one file each, only numpy / scipy /
+matplotlib; no kidpack needed) to hand out; see `examples/README.md`.
+`01_kid_response_toymc.py` computes the response of a KID from the ideal S21 of a
+notch resonator and compares it for different parameters; `02_pulse_analysis.py`
+analyses a waveform file (pedestal, peak, half-max times, integral; rebin 5) and
+histograms the pedestals.
+
 ## Layout
 
 ```
 src/kidpack/       package source (daq/: pulse DAQ, iqscan/: IQ scan,
                    monitor/: online check; rawdata.py: raw-file reader)
 scripts/           stand-alone measurement scripts (VacuumGauge/read.py)
+examples/          sample macros for students (stand-alone, see examples/README.md)
 tests/             pytest tests
 data/              DAQ output (created by kidpack-daq, not tracked by git)
 ```
