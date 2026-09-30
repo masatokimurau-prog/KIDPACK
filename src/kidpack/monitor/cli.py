@@ -4,9 +4,12 @@ import glob
 import os
 import sys
 
+from matplotlib.figure import Figure
+
 from kidpack.daq.config import default_output_dir
-from kidpack.monitor.pulses import (N_EVENTS, make_pulse_view, plot_iq_plane,
-                                    plot_waveforms, select_events)
+from kidpack.monitor.pulses import (DEFAULT_REBIN, N_EVENTS, SAVE_DPI, SHOW_FIGSIZE,
+                                    make_pulse_view, plot_iq_plane, plot_waveforms,
+                                    select_events)
 from kidpack.rawdata import RawDataError, load_raw
 
 
@@ -22,8 +25,9 @@ def find_latest_raw_file(data_dir):
 def build_parser():
     p = argparse.ArgumentParser(
         prog='kidpack-monitor',
-        description=f'Online check of a raw NPZ file: pc1.png (IQ plane) and pc2.png '
-                    f'(waveforms) of {N_EVENTS} events in a 4x4 grid. The data is only read.')
+        description=f'Online check of a raw NPZ file: pc1 (IQ plane) and pc2 (waveforms) of '
+                    f'{N_EVENTS} events in a 4x4 grid, saved as pc1.png / pc2.png and shown in '
+                    f'windows (close them to exit). The data is only read.')
     p.add_argument('file', nargs='?',
                    help='raw .npz file (default: the newest one under --data-dir)')
     p.add_argument('--data-dir', default=default_output_dir(),
@@ -31,8 +35,12 @@ def build_parser():
                         % default_output_dir().replace('%', '%%'))
     p.add_argument('--output-dir', default='.',
                    help='where pc1.png and pc2.png are written (default: current directory)')
-    p.add_argument('--rebin', type=int, default=1, metavar='N',
-                   help='average N consecutive samples before locating the peak (default: 1)')
+    p.add_argument('--rebin', type=int, default=DEFAULT_REBIN, metavar='N',
+                   help='average N consecutive samples before locating the peak; the points '
+                        'in pc1 are these averages (default: %(default)s)')
+    p.add_argument('--no-show', action='store_true',
+                   help='only write the PNG files, do not open windows (e.g. on a machine '
+                        'without a display)')
     p.add_argument('--alpha', action='store_true',
                    help='pedestal from the first 100 ns instead of the pre-trigger region')
     p.add_argument('--stride', type=int, default=1, metavar='K',
@@ -59,11 +67,29 @@ def main(argv=None):
         print(f'error: {e}', file=sys.stderr)
         return 1
 
+    show = not args.no_show
+    if show:
+        import matplotlib.pyplot as plt  # only when windows are wanted
+        make_figure = plt.figure
+    else:
+        make_figure = Figure
+
     os.makedirs(args.output_dir, exist_ok=True)
-    for name, make_figure in (('pc1.png', plot_iq_plane), ('pc2.png', plot_waveforms)):
-        make_figure(view).savefig(os.path.join(args.output_dir, name))
+    figures = []
+    for name, plot in (('pc1.png', plot_iq_plane), ('pc2.png', plot_waveforms)):
+        fig = plot(view, make_figure)
+        fig.savefig(os.path.join(args.output_dir, name), dpi=SAVE_DPI)
+        figures.append(fig)
     print(f'{path}: events {view.event_id[0]}..{view.event_id[-1]} ({view.n}) '
           f'-> {os.path.join(args.output_dir, "pc1.png")}, pc2.png')
+
+    if show:
+        try:
+            for fig in figures:
+                fig.set_size_inches(*SHOW_FIGSIZE)  # fit the screen; the PNGs are already saved
+            plt.show()  # blocks until the windows are closed
+        finally:
+            plt.close('all')
     return 0
 
 

@@ -1,16 +1,27 @@
 import hashlib
 import os
+import struct
 
+import matplotlib.image as mpimg
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
 from kidpack.daq.backends.simulator import SimulatedScope
 from kidpack.daq.config import DaqConfig
 from kidpack.daq.runner import run_daq
-from kidpack.monitor.cli import find_latest_raw_file, main
-from kidpack.monitor.pulses import (make_pulse_view, plot_iq_plane, plot_waveforms, rebin,
+from kidpack.monitor.cli import build_parser, find_latest_raw_file, main
+from kidpack.monitor.pulses import (DEFAULT_REBIN, FIGSIZE, SAVE_DPI, SHOW_FIGSIZE,
+                                    make_pulse_view, plot_iq_plane, plot_waveforms, rebin,
                                     select_events)
 from kidpack.rawdata import RawData, time_axis_s
+
+def png_size(path):
+    with open(path, 'rb') as f:
+        header = f.read(24)
+    assert header[:8] == b'\x89PNG\r\n\x1a\n'
+    return struct.unpack('>II', header[16:24])  # (width, height) in px
+
 
 PED = (0.030, -0.060)  # V
 AMP = 0.010  # V
@@ -133,10 +144,73 @@ def test_pc2_plots_i_q_and_proj_in_mv_versus_microseconds():
     raw, _ = synthetic_raw()
     view = make_pulse_view(raw, [0])
     ax = plot_waveforms(view).axes[0]
-    assert [line.get_label() for line in ax.lines] == ['I', 'Q', 'Proj']
-    np.testing.assert_allclose(ax.lines[2].get_ydata(), view.proj[0] * 1e3)
-    np.testing.assert_allclose(ax.lines[0].get_xdata(), view.tbin_us)
+    curves = [line for line in ax.lines if line.get_marker() in (None, 'None')]
+    assert [line.get_label() for line in curves] == ['I', 'Q', 'Proj']
+    np.testing.assert_allclose(curves[2].get_ydata(), view.proj[0] * 1e3)
+    np.testing.assert_allclose(curves[0].get_xdata(), view.tbin_us)
     assert ax.get_xlabel() == 'time [µs]' and ax.get_ylabel() == 'voltage [mV]'
+
+
+def independent_peak(raw, k, rebin_factor=1):
+    """Peak of |(ch0 - ped0) + i (ch1 - ped1)| computed step by step, as the procedure reads:
+    subtract each channel's pre-trigger mean, rebin, then take the largest magnitude."""
+    end = int(raw.npts * raw.ref_position / 100)
+    i = raw.ch0[k].astype(np.float64) - raw.ch0[k, :end].astype(np.float64).mean()
+    q = raw.ch1[k].astype(np.float64) - raw.ch1[k, :end].astype(np.float64).mean()
+    n = len(i) // rebin_factor * rebin_factor
+    i = i[:n].reshape(-1, rebin_factor).mean(axis=1)
+    q = q[:n].reshape(-1, rebin_factor).mean(axis=1)
+    magnitude = np.hypot(i, q)
+    return int(np.argmax(magnitude)), magnitude.max()
+
+
+@pytest.mark.parametrize('rebin_factor', [1, 4])
+def test_pc2_marks_ch0_and_ch1_at_the_sample_of_the_largest_iq_excursion(rebin_factor):
+    raw, _ = synthetic_raw()
+    ks = list(range(16))
+    view = make_pulse_view(raw, ks, rebin_factor=rebin_factor)
+    fig = plot_waveforms(view)
+    for k, ax in zip(ks, fig.axes):
+        stars = [line for line in ax.lines if line.get_marker() == '*']
+        assert len(stars) == 2 and all(line.get_color() == 'r' for line in stars)
+        peak, magnitude = independent_peak(raw, k, rebin_factor)
+
+        assert view.peak_index[k] == peak
+        assert view.proj_max[k] == pytest.approx(magnitude, rel=1e-5)
+        t_star = {float(line.get_xdata()[0]) for line in stars}
+        assert t_star == {float(view.tbin_us[peak])}  # both stars at the peak time
+        # the stars sit on the I and Q curves (raw values, pedestal not subtracted)
+        assert stars[0].get_ydata()[0] == pytest.approx(view.i[k, peak] * 1e3)
+        assert stars[1].get_ydata()[0] == pytest.approx(view.q[k, peak] * 1e3)
+        # and the peak is a maximum of the projected waveform, equal to proj max
+        assert view.proj[k].argmax() == peak
+        assert view.proj[k, peak] == pytest.approx(view.proj_max[k], rel=1e-5)
+
+
+def test_the_pc2_stars_are_the_same_point_as_the_pc1_star():
+    raw, _ = synthetic_raw()
+    view = make_pulse_view(raw, [3, 11])
+    iq = plot_iq_plane(view)
+    wf = plot_waveforms(view)
+    for k in range(2):
+        star_iq = [line for line in iq.axes[k].lines if line.get_marker() == '*'][0]
+        star_i, star_q = [line for line in wf.axes[k].lines if line.get_marker() == '*']
+        assert star_iq.get_xdata()[0] == pytest.approx(star_i.get_ydata()[0], abs=1e-3)  # I [mV]
+        assert star_iq.get_ydata()[0] == pytest.approx(star_q.get_ydata()[0], abs=1e-3)  # Q [mV]
+
+
+def test_the_peak_marker_is_labelled_once_in_the_legend():
+    raw, _ = synthetic_raw()
+    ax = plot_waveforms(make_pulse_view(raw, [0])).axes[0]
+    assert [t.get_text() for t in ax.get_legend().get_texts()] == ['I', 'Q', 'Proj', 'proj max']
+
+
+def test_more_events_than_panels_is_an_error_not_an_index_error():
+    raw, _ = synthetic_raw(nevents=20)
+    view = make_pulse_view(raw, np.arange(17))
+    for make_figure in (plot_iq_plane, plot_waveforms):
+        with pytest.raises(ValueError, match='at most 16'):
+            make_figure(view)
 
 
 def test_fewer_events_than_panels_leave_the_rest_blank():
@@ -166,7 +240,7 @@ def test_cli_writes_pc1_and_pc2_and_leaves_the_data_alone(tmp_path, capsys):
     path = make_run(data_dir, 1)
     before = (sha(path), sorted(os.listdir(data_dir)), sorted(os.listdir(path.parent.parent)))
 
-    assert main([str(path), '--output-dir', str(tmp_path / 'out')]) == 0
+    assert main([str(path), '--no-show', '--output-dir', str(tmp_path / 'out')]) == 0
     for name in ('pc1.png', 'pc2.png'):
         assert (tmp_path / 'out' / name).read_bytes()[:8] == b'\x89PNG\r\n\x1a\n'
     assert 'events 0..15 (16)' in capsys.readouterr().out
@@ -183,13 +257,14 @@ def test_cli_uses_the_newest_file_by_modification_time(tmp_path, capsys):
     os.utime(newer.parent / 'run01-01.npz.tmp', (3_000_000_000, 3_000_000_000))
 
     assert find_latest_raw_file(str(data_dir)) == str(newer)
-    assert main(['--data-dir', str(data_dir), '--output-dir', str(tmp_path / 'out')]) == 0
+    assert main(['--data-dir', str(data_dir), '--no-show', '--output-dir',
+                 str(tmp_path / 'out')]) == 0
     assert str(newer) in capsys.readouterr().out
 
 
 def test_cli_options_are_applied(tmp_path, capsys):
     path = make_run(tmp_path / 'data', 1, events=40)
-    assert main([str(path), '--output-dir', str(tmp_path / 'o'), '--stride', '2',
+    assert main([str(path), '--no-show', '--output-dir', str(tmp_path / 'o'), '--stride', '2',
                  '--rebin', '4', '--alpha']) == 0
     assert 'events 0..30 (16)' in capsys.readouterr().out
 
@@ -206,3 +281,131 @@ def test_cli_reports_problems_without_a_traceback(tmp_path, capsys):
     for bad in (['--rebin', '0'], ['--stride', '0']):
         with pytest.raises(SystemExit):
             main([str(tmp_path / 'bad.npz'), *bad])
+
+
+# --- interactive display ---------------------------------------------------------
+
+def test_cli_saves_the_pngs_and_then_shows_both_figures_in_windows(tmp_path, shown):
+    path = make_run(tmp_path / 'data', 1)
+    assert main([str(path), '--output-dir', str(tmp_path / 'out')]) == 0
+
+    # plt.show() is called once, with the two figures at screen size ...
+    assert shown == [[SHOW_FIGSIZE, SHOW_FIGSIZE]]
+    # ... but the PNGs were saved before that, at full size
+    expected = (FIGSIZE[0] * SAVE_DPI, FIGSIZE[1] * SAVE_DPI)
+    assert png_size(tmp_path / 'out' / 'pc1.png') == png_size(tmp_path / 'out' / 'pc2.png') == expected
+    assert plt.get_fignums() == []  # windows are cleaned up once show() returns
+
+
+def test_no_show_only_writes_the_pngs(tmp_path, shown):
+    path = make_run(tmp_path / 'data', 1)
+    assert main([str(path), '--no-show', '--output-dir', str(tmp_path / 'out')]) == 0
+    assert shown == [] and plt.get_fignums() == []
+    assert png_size(tmp_path / 'out' / 'pc1.png') == (2000, 1700)
+
+
+def test_showing_does_not_change_the_saved_images(tmp_path):
+    path = make_run(tmp_path / 'data', 1)
+    main([str(path), '--output-dir', str(tmp_path / 'shown')])
+    main([str(path), '--no-show', '--output-dir', str(tmp_path / 'hidden')])
+    for name in ('pc1.png', 'pc2.png'):
+        np.testing.assert_array_equal(mpimg.imread(tmp_path / 'shown' / name),
+                                      mpimg.imread(tmp_path / 'hidden' / name))
+
+
+def test_figures_are_closed_even_if_the_window_fails(tmp_path, monkeypatch):
+    path = make_run(tmp_path / 'data', 1)
+
+    def broken_show(*args, **kwargs):
+        raise RuntimeError('no display')
+
+    monkeypatch.setattr(plt, 'show', broken_show)
+    with pytest.raises(RuntimeError, match='no display'):
+        main([str(path), '--output-dir', str(tmp_path / 'out')])
+    assert plt.get_fignums() == []
+    assert (tmp_path / 'out' / 'pc1.png').exists()  # what was saved before the failure stays
+
+
+def test_no_window_is_opened_when_the_input_is_bad(tmp_path, shown):
+    assert main([str(tmp_path / 'nonexistent.npz'), '--output-dir', str(tmp_path)]) == 1
+    assert main(['--data-dir', str(tmp_path / 'empty'), '--output-dir', str(tmp_path)]) == 1
+    assert shown == [] and plt.get_fignums() == []
+
+
+# --- default rebin and the points of pc1 --------------------------------------------
+
+def scatter_points(fig, k):
+    """(x, y) of the points drawn in panel k of pc1, in mV."""
+    return fig.axes[k].collections[0].get_offsets()
+
+
+def star_of(fig, k):
+    star = [line for line in fig.axes[k].lines if line.get_marker() == '*'][0]
+    return np.array([star.get_xdata()[0], star.get_ydata()[0]])
+
+
+def test_rebin_5_is_the_default_of_the_command(tmp_path, monkeypatch):
+    assert DEFAULT_REBIN == 5
+    assert build_parser().parse_args([]).rebin == 5
+
+    seen = []
+    import kidpack.monitor.cli as cli
+    original = cli.make_pulse_view
+    monkeypatch.setattr(cli, 'make_pulse_view',
+                        lambda *a, **k: seen.append(k['rebin_factor']) or original(*a, **k))
+    path = make_run(tmp_path / 'data', 1)
+    assert main([str(path), '--no-show', '--output-dir', str(tmp_path / 'a')]) == 0
+    assert main([str(path), '--no-show', '--rebin', '2', '--output-dir', str(tmp_path / 'b')]) == 0
+    assert seen == [5, 2]
+
+
+def test_the_library_function_itself_does_not_smooth_unless_asked():
+    raw, _ = synthetic_raw()
+    assert make_pulse_view(raw, [0]).rebin_factor == 1
+
+
+def test_with_the_default_rebin_the_pc1_star_is_one_of_the_drawn_points():
+    raw, _ = synthetic_raw(nevents=16)  # pulses on top of noise
+    noise = np.random.default_rng(1).normal(0, 3e-4, raw.ch0.shape).astype(np.float32)
+    raw.ch0 = raw.ch0 + noise  # noisy enough that the peak sample matters
+    view = make_pulse_view(raw, np.arange(16), rebin_factor=DEFAULT_REBIN)
+    fig = plot_iq_plane(view)
+    for k in range(16):
+        points = scatter_points(fig, k)
+        assert len(points) == 1000 // 5  # one point per rebinned sample, no further averaging
+        distance = np.hypot(*(points - star_of(fig, k)).T).min()
+        assert distance < 1e-4, f'event {k}: star is {distance:.2e} mV from the nearest point'
+
+
+def test_the_star_is_never_outside_the_cloud_of_a_pure_noise_event():
+    # the situation of a random-trigger file: no pulse, the peak is the largest noise excursion
+    rng = np.random.default_rng(0)
+    raw = RawData('noise.npz', rng.normal(0.27e-3, 1e-4, (16, 5000)).astype(np.float32),
+                  rng.normal(0.17e-3, 1e-4, (16, 5000)).astype(np.float32), np.arange(16),
+                  5000, 2.5e9, 20.0)
+    view = make_pulse_view(raw, np.arange(16), rebin_factor=DEFAULT_REBIN)
+    fig = plot_iq_plane(view)
+    for k in range(16):
+        ped = np.array([view.ped_i[k], view.ped_q[k]]) * 1e3
+        cloud = np.hypot(*(scatter_points(fig, k) - ped).T).max()
+        assert np.hypot(*(star_of(fig, k) - ped)) <= cloud * (1 + 1e-6)
+
+
+@pytest.mark.parametrize('rebin_factor, samples_per_point', [(1, 5), (2, 6), (3, 6), (4, 8),
+                                                              (5, 5), (10, 10)])
+def test_every_pc1_point_averages_at_least_five_samples(rebin_factor, samples_per_point):
+    raw, _ = synthetic_raw(nevents=2, npts=1200)
+    view = make_pulse_view(raw, [0], rebin_factor=rebin_factor)
+    points = scatter_points(plot_iq_plane(view), 0)
+    n_bins = 1200 // rebin_factor
+    extra = -(-5 // rebin_factor)
+    assert len(points) == n_bins // extra
+    assert rebin_factor * extra == samples_per_point
+
+
+def test_rebin_1_reproduces_the_5_sample_averages_of_the_old_macro():
+    raw, _ = synthetic_raw(nevents=2)
+    view = make_pulse_view(raw, [0], rebin_factor=1)
+    xy = scatter_points(plot_iq_plane(view), 0)
+    np.testing.assert_allclose(xy[:, 0], rebin(view.i[0], 5) * 1e3, rtol=1e-6)
+    np.testing.assert_allclose(xy[:, 1], rebin(view.q[0], 5) * 1e3, rtol=1e-6)

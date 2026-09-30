@@ -48,21 +48,33 @@ kidpack-daq --run-number 12 --events-per-file 1000 --num-files 5 \
 
 ## Online check
 
-`kidpack-monitor` (or `python -m kidpack.monitor`) writes `pc1.png` (IQ plane)
-and `pc2.png` (I, Q and the projected waveform) for 16 events in a 4x4 grid,
-the same figures as `main_singlefile` of `analysis/ana_forJPS.py`. The data is
+`kidpack-monitor` (or `python -m kidpack.monitor`) makes `pc1` (IQ plane) and
+`pc2` (I, Q and the projected waveform) for 16 events in a 4x4 grid, the same
+figures as `main_singlefile` of `analysis/ana_forJPS.py`. It saves them as
+`pc1.png` / `pc2.png` and opens them in windows (`plt.show()`; close the
+windows to exit; `--no-show` to only save, e.g. without a display). The data is
 only read, never modified.
 
 ```bash
 kidpack-monitor                          # newest file under KIDPACK/data/, PNGs in the current directory
-kidpack-monitor path/to/run12-03.npz --output-dir /tmp/check
-kidpack-monitor --rebin 4 --alpha --stride 2
+kidpack-monitor path/to/run12-03.npz --output-dir /tmp/check --no-show
+kidpack-monitor --rebin 1 --alpha --stride 2   # no smoothing before the peak search
 ```
 
 - Events shown: the first 16 of the file (`--stride K`: every K-th; the old
   macro used 2).
-- Pedestal: mean over the pre-trigger samples per event (`--alpha`: the first
-  100 ns). `--rebin N` averages N samples before the peak is located.
+- Pedestal: mean over the pre-trigger samples per event and channel
+  (`--alpha`: the first 100 ns). It is subtracted from ch0 and ch1, the result
+  is rebinned (`--rebin N`, default 5 samples), and the peak is the bin where
+  |(ch0 - ped0) + i (ch1 - ped1)| is largest (`proj max`).
+- pc1 points: with `--rebin` 5 or more (default 5) they are exactly the rebinned
+  samples the peak is searched in, so the red star is one of the drawn points;
+  with a smaller `--rebin` they are averaged further to at least 5 samples per
+  point (`--rebin 1` gives the 5-sample averages of the old macro), so the star
+  can lie outside the cloud. The red stars mark the peak: in pc1 at (I, Q); in
+  pc2 as the ch0 and ch1 values at the peak time, drawn on the (raw, pedestal
+  not subtracted) I and Q curves. The green Proj curve, the I/Q rotated onto the
+  peak phase, peaks at `proj max`.
 
 ## IQ scan
 

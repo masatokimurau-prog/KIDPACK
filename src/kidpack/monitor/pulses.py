@@ -8,6 +8,7 @@ Per event: the pedestal is the mean I and Q over the pre-trigger samples
 (``--alpha``: the first 100 ns); the pedestal-subtracted I + iQ is rotated onto
 the phase of its largest excursion, which gives the "Proj" waveform.
 """
+import math
 from dataclasses import dataclass
 
 import matplotlib as mpl
@@ -18,7 +19,11 @@ from kidpack.rawdata import time_axis_s
 
 NROWS = NCOLS = 4
 N_EVENTS = NROWS * NCOLS
-IQ_SCATTER_REBIN = 5  # extra averaging of the points shown in the IQ plane
+FIGSIZE = (20, 17)  # inches; the saved PNGs are 2000 x 1700 px at SAVE_DPI
+SAVE_DPI = 100
+SHOW_FIGSIZE = (14, 12)  # window size on screen (what the old 2x2 macro used)
+DEFAULT_REBIN = 5  # default of the kidpack-monitor command (make_pulse_view itself defaults to 1)
+IQ_SCATTER_REBIN = 5  # every point shown in the IQ plane averages at least this many samples
 ALPHA_PEDESTAL_S = 100e-9
 
 _STYLE = {
@@ -46,6 +51,8 @@ class PulseView:
     ped_q: np.ndarray  # (n,)
     proj_max: np.ndarray  # (n,) largest |I + iQ - pedestal|
     proj_theta: np.ndarray  # (n,) phase of that largest excursion [rad]
+    peak_index: np.ndarray  # (n,) index into the (re)binned waveforms where it occurs
+    rebin_factor: int  # samples averaged into each bin of i, q, proj
 
     @property
     def n(self):
@@ -69,7 +76,10 @@ def select_events(nevents, stride=1, n=N_EVENTS):
 
 
 def make_pulse_view(raw, indices, rebin_factor=1, alpha=False):
-    """Pedestal, peak phase and projected waveform of the events ``indices``."""
+    """Pedestal, peak phase and projected waveform of the events ``indices``.
+
+    ``rebin_factor`` samples are averaged before the peak is located (1 = none).
+    """
     rebin_factor = int(rebin_factor)
     if rebin_factor < 1:
         raise ValueError('rebin factor must be >= 1')
@@ -95,12 +105,15 @@ def make_pulse_view(raw, indices, rebin_factor=1, alpha=False):
     return PulseView(event_id=raw.event_id[indices], tbin_us=tbin_us,
                      i=rebin(i_raw, rebin_factor), q=rebin(q_raw, rebin_factor), proj=proj,
                      ped_i=ped_i, ped_q=ped_q,
-                     proj_max=magnitude.max(axis=1), proj_theta=theta)
+                     proj_max=magnitude.max(axis=1), proj_theta=theta, peak_index=peak,
+                     rebin_factor=rebin_factor)
 
 
-def _grid(view, sharex=True):
-    fig = Figure(figsize=(20, 17), layout='constrained')
-    axs = fig.subplots(NROWS, NCOLS, sharex=sharex, sharey=True, squeeze=False)
+def _grid(view, make_figure):
+    if view.n > N_EVENTS:
+        raise ValueError(f'at most {N_EVENTS} events fit in the {NROWS}x{NCOLS} grid, got {view.n}')
+    fig = make_figure(figsize=FIGSIZE, layout='constrained')
+    axs = fig.subplots(NROWS, NCOLS, sharex=True, sharey=True, squeeze=False)
     for k, ax in enumerate(axs.flat):
         if k >= view.n:
             ax.axis('off')  # fewer events than panels
@@ -111,16 +124,26 @@ def _is_bottom(k, n):
     return k + NCOLS >= n  # nothing plotted below this panel
 
 
-def plot_iq_plane(view):
-    """pc1: I/Q of each event coloured by time, with the pedestal (x) and the peak (*)."""
+def plot_iq_plane(view, make_figure=Figure):
+    """pc1: I/Q of each event coloured by time, with the pedestal (x) and the peak (*).
+
+    The points are the rebinned samples in which the peak was searched, averaged
+    further only if that leaves fewer than IQ_SCATTER_REBIN samples per point (so
+    with the default rebin the star is one of the drawn points, and with rebin 1
+    the points are 5-sample averages as in the old macro).
+
+    ``make_figure`` creates the figure: ``Figure`` (default) for a plain figure to
+    save, ``matplotlib.pyplot.figure`` for one that can be shown in a window.
+    """
     with mpl.rc_context(_STYLE):
-        fig, axs = _grid(view)
-        vt = rebin(view.tbin_us, IQ_SCATTER_REBIN)
+        fig, axs = _grid(view, make_figure)
+        step = math.ceil(IQ_SCATTER_REBIN / view.rebin_factor)  # extra averaging, 1 = none
+        vt = rebin(view.tbin_us, step)
         image = None
         for k in range(view.n):
             ax = axs.flat[k]
-            v0 = rebin(view.i[k], IQ_SCATTER_REBIN)
-            v1 = rebin(view.q[k], IQ_SCATTER_REBIN)
+            v0 = rebin(view.i[k], step)
+            v1 = rebin(view.q[k], step)
             image = ax.scatter(v0 * 1e3, v1 * 1e3, c=vt, cmap='viridis', s=8)
             ax.plot(view.ped_i[k] * 1e3, view.ped_q[k] * 1e3, 'x', ms=9, color='r', label='ped')
             ax.plot((view.proj_max[k] * np.cos(view.proj_theta[k]) + view.ped_i[k]) * 1e3,
@@ -137,15 +160,24 @@ def plot_iq_plane(view):
     return fig
 
 
-def plot_waveforms(view):
-    """pc2: I, Q (raw) and the projected waveform of each event."""
+def plot_waveforms(view, make_figure=Figure):
+    """pc2: I, Q (raw) and the projected waveform of each event.
+
+    The red stars mark the I and Q values at the sample where the pedestal-subtracted
+    |I + iQ| is largest (``proj max``): the same point as the red star in pc1.
+    """
     with mpl.rc_context(_STYLE):
-        fig, axs = _grid(view)
+        fig, axs = _grid(view, make_figure)
         for k in range(view.n):
             ax = axs.flat[k]
             ax.plot(view.tbin_us, view.i[k] * 1e3, label='I')
             ax.plot(view.tbin_us, view.q[k] * 1e3, label='Q')
             ax.plot(view.tbin_us, view.proj[k] * 1e3, label='Proj')
+            peak = view.peak_index[k]
+            ax.plot(view.tbin_us[peak], view.i[k, peak] * 1e3, '*', ms=10, color='r',
+                    label='proj max')
+            ax.plot(view.tbin_us[peak], view.q[k, peak] * 1e3, '*', ms=10, color='r',
+                    label='_nolegend_')
             if _is_bottom(k, view.n):
                 ax.set_xlabel('time [µs]')
             if k % NCOLS == 0:
