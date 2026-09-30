@@ -20,7 +20,7 @@ digitizer. Every setting that was hard-coded in the old `kid.py` is an option
 (`kidpack-daq --help`); the defaults reproduce the old values.
 
 ```bash
-pip install -e ".[daq]"     # on the DAQ PC (adds the niscope bindings)
+pip install -e ".[daq]"     # on the DAQ PC (adds only the niscope binding; see below)
 
 kidpack-daq --run-number 12 --events-per-file 1000 --num-files 5 \
     --condition "temp 5.5K (pid); lna 1.9V 13.7mA; sg 5.490GHz -12dBm"
@@ -37,14 +37,18 @@ kidpack-daq --run-number 12 --events-per-file 1000 --num-files 5 \
   appended to `run_summary.txt` (tab-separated) in `--output-dir`
   (i.e. `KIDPACK/data/run_summary.txt`, also git-ignored).
 - Signal generator: give `--sg-frequency` and `--sg-power` to let the DAQ set
-  and start it (NI's `nirfsg` package, installed with `pip install -e ".[daq]"`;
-  resource `--sg-resource`, default `PXI2Slot3`); without them it is not touched.
+  and start it (through NI's `nirfsg`; resource `--sg-resource`, default
+  `PXI2Slot3`); without them it is not touched.
 - Random trigger: `--random-trigger` makes the DAQ issue a software trigger
   itself, once per `--random-trigger-interval` seconds (default 1), instead of
   waiting for the edge trigger (`--trigger-*` options cannot be combined with
   it). Use it for unbiased noise/baseline waveforms. The interval is fixed and
   drift-free; `timestamp_unix_ns` is the time the trigger was sent.
 - `--backend simulator` runs without any hardware.
+- `nirfsg` (NI's package, plus the NI-RFSG driver) is **not** installed by
+  kidpack: it must already be in the Python environment, so that the installed
+  version is never installed over or upgraded. `pip install -e ".[daq]"` only adds
+  `niscope`; if that is installed too, plain `pip install -e .` is enough.
 
 ## Online check
 
@@ -105,8 +109,7 @@ kidpack-iqscan --f-start 4.414e9 --f-stop 4.514e9 --num-points 101 --power -30 -
 - Ctrl-C stops the scan, keeps the points measured so far (`status:
   interrupted`) and always stops the generator. `--settle-time S` waits after
   starting the generator at each point (the old script had that commented out).
-- The generator is driven through NI's `nirfsg` (`pip install -e ".[daq]"`) exactly
-  as in the macro `iq_scan_kimura20260703.py`: for every frequency a session is
+- The generator is driven through NI's `nirfsg` exactly as in the macro `iq_scan_kimura20260703.py`: for every frequency a session is
   opened with `id_query=True, reset_device=True`, set to CW, started, and
   aborted and closed after the acquisition; the driver session's lock is
   replaced by a no-op, as the macro does. `--backend simulator` runs without

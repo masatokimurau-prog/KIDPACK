@@ -11,8 +11,9 @@ for every frequency of an IQ scan, once per run of the pulse DAQ):
     stop:   abort(); close the session
 
 The ``lock`` replacement is kept because the macro needs it; the reason is not
-known. Install the package with ``pip install nirfsg`` (it also needs the NI-RFSG
-driver).
+known. NI's ``nirfsg`` package (and the NI-RFSG driver) must already be installed in
+the Python environment: kidpack does not install it, so that the installed versions
+are never touched.
 """
 import contextlib
 import logging
@@ -30,9 +31,9 @@ class NiRfsgBackend(SgBackend):
             import nirfsg
         except ImportError as e:
             raise ImportError(
-                "the 'nirfsg' module is not installed, so the signal generator cannot be "
-                "controlled: install NI's package with 'pip install nirfsg' (it also needs "
-                "the NI-RFSG driver)") from e
+                "the 'nirfsg' module is not installed in this Python environment, so the "
+                "signal generator cannot be controlled. kidpack does not install it: install "
+                "NI's package yourself (e.g. 'pip install nirfsg', plus the NI-RFSG driver)") from e
         self._nirfsg = nirfsg
         self._resource = resource
         self._session = None  # open only between start() and stop()
