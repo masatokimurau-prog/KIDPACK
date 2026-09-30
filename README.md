@@ -37,8 +37,8 @@ kidpack-daq --run-number 12 --events-per-file 1000 --num-files 5 \
   appended to `run_summary.txt` (tab-separated) in `--output-dir`
   (i.e. `KIDPACK/data/run_summary.txt`, also git-ignored).
 - Signal generator: give `--sg-frequency` and `--sg-power` to let the DAQ set
-  and start it; without them it is not touched. It needs the site-specific
-  `nirfsg` module (`PXIe_5654`); do not `pip install nirfsg`.
+  and start it (NI's `nirfsg` package, installed with `pip install -e ".[daq]"`;
+  resource `--sg-resource`, default `PXI2Slot3`); without them it is not touched.
 - Random trigger: `--random-trigger` makes the DAQ issue a software trigger
   itself, once per `--random-trigger-interval` seconds (default 1), instead of
   waiting for the edge trigger (`--trigger-*` options cannot be combined with
@@ -82,12 +82,13 @@ kidpack-monitor --rebin 1 --alpha --stride 2   # no smoothing before the peak se
 frequency: at each frequency the signal generator is set and started, the
 digitizer acquires `--num-records` records immediately (no trigger), the
 generator is stopped, and the mean I (ch0) and Q (ch1) over all samples are
-stored. Same measurement as the seed `iq_scan.py`; every value that was
-hard-coded there is an option (`kidpack-iqscan --help`), the defaults are the
-old values. Only the frequency range is required.
+stored. The measurement and the defaults (-2 dBm, 1 s records at 10 kS/s, 2
+records, +-1 V range, 1 Mohm input, SG `PXI2Slot3`) are those of the macro
+`iq_scan_kimura20260703.py`; every value hard-coded there is an option
+(`kidpack-iqscan --help`). Only the frequency range is required.
 
 ```bash
-kidpack-iqscan --f-start 5.324e9 --f-stop 5.328e9 --num-points 51 --power -10 \
+kidpack-iqscan --f-start 5.213e9 --f-stop 5.313e9 --num-points 101 --power -2 \
     --condition "temp 5.5K (pid); lna 1.9V"
 kidpack-iqscan --f-start 4.414e9 --f-stop 4.514e9 --num-points 101 --power -30 --name T5.5K_-30dBm
 ```
@@ -104,9 +105,12 @@ kidpack-iqscan --f-start 4.414e9 --f-stop 4.514e9 --num-points 101 --power -30 -
 - Ctrl-C stops the scan, keeps the points measured so far (`status:
   interrupted`) and always stops the generator. `--settle-time S` waits after
   starting the generator at each point (the old script had that commented out).
-- The generator is the site-specific `nirfsg` module (`PXIe_5654`), as for the
-  pulse DAQ. `--backend simulator` runs without hardware (a notch resonator in
-  the middle of the scan range).
+- The generator is driven through NI's `nirfsg` (`pip install -e ".[daq]"`) exactly
+  as in the macro `iq_scan_kimura20260703.py`: for every frequency a session is
+  opened with `id_query=True, reset_device=True`, set to CW, started, and
+  aborted and closed after the acquisition; the driver session's lock is
+  replaced by a no-op, as the macro does. `--backend simulator` runs without
+  hardware (a notch resonator in the middle of the scan range).
 
 ### Quick look at a scan
 

@@ -36,6 +36,8 @@ def run_iqscan(cfg, scope, sg, writer=None, command_line=None, sleep=time.sleep)
     """
     writer = writer or IqScanWriter(cfg, command_line=command_line)
     writer.timestamp_source = scope.timestamp_source
+    writer.sg_api = getattr(sg, 'api', None)
+    writer.sg_info = dict(getattr(sg, 'info', None) or {})
     try:
         writer.check_new()
         return _scan(cfg, scope, sg, writer, sleep)
@@ -64,6 +66,8 @@ def _scan(cfg, scope, sg, writer, sleep):
     with log_to_console(log):
         log.info('IQ scan %s: %d points, %.6f - %.6f GHz, %g dBm', writer.stem, cfg.num_points,
                  cfg.f_start / 1e9, cfg.f_stop / 1e9, cfg.power)
+        log.info('signal generator: %s, %s%s', cfg.sg_resource, writer.sg_api or 'simulated',
+                 f' {writer.sg_info}' if writer.sg_info else '')
         log.info('condition: %s', cfg.condition or '(none)')
         log.info('config: %s', json.dumps(cfg.to_dict()))
         try:

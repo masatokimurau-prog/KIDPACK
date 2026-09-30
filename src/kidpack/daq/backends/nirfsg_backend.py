@@ -1,28 +1,98 @@
-"""Signal generator backend (PXIe-5654), following ``iq_scan.py``.
+"""Signal generator backend (PXIe-5654) through NI's official ``nirfsg`` package.
 
-``PXIe_5654`` with ``rf_frequency`` / ``rf_power`` / ``initiate`` / ``abort`` is
-the API of the ``nirfsg`` module installed on the DAQ PC. It is NOT the API of
-the official ``nirfsg`` package on PyPI (which has ``Session`` instead), so do
-not ``pip install nirfsg`` over it.
+The calls, their order and the quirks follow the macro ``iq_scan_kimura20260703.py``,
+which is known to work on the DAQ PC. For every ``start`` / ``stop`` pair (that is:
+for every frequency of an IQ scan, once per run of the pulse DAQ):
+
+    start:  open  nirfsg.Session(resource, id_query=True, reset_device=True)
+            replace the session's ``lock`` by a no-op        (as the macro does)
+            generation_mode = CW; configure_rf(frequency, power); output_enabled = True
+            initiate()                        (returns when the RF output has settled)
+    stop:   abort(); close the session
+
+The ``lock`` replacement is kept because the macro needs it; the reason is not
+known. Install the package with ``pip install nirfsg`` (it also needs the NI-RFSG
+driver).
 """
+import contextlib
+import logging
+
 from kidpack.daq.backends.base import SgBackend
+
+log = logging.getLogger('kidpack.daq')
 
 
 class NiRfsgBackend(SgBackend):
+    api = 'nirfsg.Session (CW, session reset and re-opened per start)'
+
     def __init__(self, resource):
-        from nirfsg import PXIe_5654
-        self._rfsg = PXIe_5654(resource)
+        try:
+            import nirfsg
+        except ImportError as e:
+            raise ImportError(
+                "the 'nirfsg' module is not installed, so the signal generator cannot be "
+                "controlled: install NI's package with 'pip install nirfsg' (it also needs "
+                "the NI-RFSG driver)") from e
+        self._nirfsg = nirfsg
+        self._resource = resource
+        self._session = None  # open only between start() and stop()
+        # Open the device once, exactly as a start does, so that a missing or busy
+        # generator is reported now (before a run or scan is created), and note what it is.
+        session = self._open()
+        try:
+            self.info = self._read_info(session)
+        finally:
+            session.close()
+
+    def _open(self):
+        session = self._nirfsg.Session(self._resource, id_query=True, reset_device=True)
+        try:
+            session.lock = lambda: contextlib.nullcontext()
+        except BaseException:
+            _close_quietly(session)
+            raise
+        return session
+
+    @staticmethod
+    def _read_info(session):
+        """Instrument model and driver revision (the macro prints them; they may be unavailable)."""
+        info = {}
+        for attribute in ('instrument_model', 'specific_driver_revision'):
+            try:
+                info[attribute] = str(getattr(session, attribute))
+            except Exception as e:
+                log.warning('could not read %s of the signal generator: %r', attribute, e)
+        return info
 
     def start(self, frequency, power):
-        self._rfsg.rf_frequency = frequency
-        self._rfsg.rf_power = power
-        self._rfsg.initiate()
+        self.stop()  # never leave a previous session open
+        session = self._open()
+        try:
+            session.generation_mode = self._nirfsg.GenerationMode.CW
+            session.configure_rf(frequency, power)
+            session.output_enabled = True
+            session.initiate()
+        except BaseException:
+            _close_quietly(session)
+            raise
+        self._session = session
 
     def stop(self):
-        self._rfsg.abort()
+        session, self._session = self._session, None
+        if session is None:
+            return
+        try:
+            session.abort()
+        finally:
+            session.close()
 
     def close(self):
-        # iq_scan.py never closes the device, so close() may not exist.
-        close = getattr(self._rfsg, 'close', None)
-        if close is not None:
-            close()
+        self.stop()
+
+
+def _close_quietly(session):
+    """Close a session on an error path without hiding the error that got us here."""
+    try:
+        session.close()
+    except Exception as e:
+        log.warning('failed to close the signal generator session: %r', e)

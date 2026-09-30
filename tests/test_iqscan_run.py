@@ -77,11 +77,11 @@ def test_full_scan_writes_the_old_dd_layout_plus_extras(tmp_path):
     # columns 1 and 2: mean ch0 (I) and ch1 (Q) in volts, here the notch resonator model
     model = np.array([SimulatedIqScope.AMPLITUDE * 10 ** ((-12 + 10) / 20) *
                       scope.transmission(f) for f in dd[:, 0]])
-    np.testing.assert_allclose(dd[:, 1], model.real, atol=5 * 2e-3 / np.sqrt(10000))
-    np.testing.assert_allclose(dd[:, 2], model.imag, atol=5 * 2e-3 / np.sqrt(10000))
+    np.testing.assert_allclose(dd[:, 1], model.real, atol=5 * 2e-3 / np.sqrt(20000))
+    np.testing.assert_allclose(dd[:, 2], model.imag, atol=5 * 2e-3 / np.sqrt(20000))
     assert np.argmin(np.hypot(dd[:, 1], dd[:, 2])) == N // 2  # resonance in the middle
 
-    n_samples = 5000 * 2
+    n_samples = 10000 * 2  # 1 s at 10 kS/s, 2 records
     assert set(arrays) == {'dd', 'ch0_std', 'ch1_std', 'ch0_stderr', 'ch1_stderr', 'n_samples',
                            'timestamp_unix_ns', 'scan_start_unix_ns', 'power_dbm', 'sample_rate',
                            'npts', 'num_records'}
@@ -91,14 +91,14 @@ def test_full_scan_writes_the_old_dd_layout_plus_extras(tmp_path):
     assert np.all(np.diff(arrays['timestamp_unix_ns']) >= 0)
     assert int(arrays['scan_start_unix_ns']) <= arrays['timestamp_unix_ns'][0]
     assert float(arrays['power_dbm']) == -12.0 and float(arrays['sample_rate']) == 1e4
-    assert int(arrays['npts']) == 5000 and int(arrays['num_records']) == 2
+    assert int(arrays['npts']) == 10000 and int(arrays['num_records']) == 2
 
     assert meta['status'] == 'completed' and meta['errors'] == []
     assert meta['condition'] == 'temp 5.5K, lna 1.9V'
     assert meta['scan'] == {'f_start_hz': F0, 'f_stop_hz': F1, 'num_points_requested': N,
                             'num_points_measured': N, 'power_dbm': -12.0, 'settle_time_s': 0.0}
-    assert meta['digitizer']['trigger'] == 'immediate' and meta['digitizer']['num_records'] == 2
-    assert meta['signal_generator'] == {'resource': 'PXI1Slot3'}
+    assert meta['digitizer']['trigger'].startswith('immediate') and meta['digitizer']['num_records'] == 2
+    assert meta['signal_generator'] == {'resource': 'PXI2Slot3'}  # the simulator has no NI API to record
     assert meta['start_time_utc'] <= meta['stop_time_utc']
 
 
@@ -268,5 +268,5 @@ def test_cli_reports_a_missing_driver_cleanly(tmp_path, capsys, monkeypatch):
     args = cli_args(tmp_path)
     args[args.index('--backend') + 1] = 'niscope'
     assert main(args) == 1
-    assert 'could not set up the niscope backend' in capsys.readouterr().err
+    assert 'could not set up the instruments' in capsys.readouterr().err
     assert os.listdir(tmp_path) == []

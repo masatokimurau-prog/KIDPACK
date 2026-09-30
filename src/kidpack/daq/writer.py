@@ -22,6 +22,8 @@ class RunWriter:
         self.timestamp_source = timestamp_source
         self.command_line = list(command_line) if command_line is not None else None
         self.run_start_ns = None  # set by the run control before the first write
+        self.sg_api = None  # how the signal generator is driven (set by the run control)
+        self.sg_info = {}  # its model / driver revision if known (set by the run control)
         self.run_dir = os.path.join(cfg.output_dir, f'run_{cfg.run_number:02d}')
         self.data_dir = os.path.join(self.run_dir, 'data')
         self.config_dir = os.path.join(self.run_dir, 'config')
@@ -88,7 +90,8 @@ class RunWriter:
             'resource': cfg.resource,
             'fetch_timeout_s': cfg.fetch_timeout,
             'sg': ({'controlled_by_daq': True, 'frequency_hz': cfg.sg.frequency,
-                    'power_dbm': cfg.sg.power, 'resource': cfg.sg.resource}
+                    'power_dbm': cfg.sg.power, 'resource': cfg.sg.resource,
+                    **({'api': self.sg_api} if self.sg_api else {}), **self.sg_info}
                    if cfg.sg else {'controlled_by_daq': False}),
             'timestamp_unix_ns_source': self.timestamp_source,
             'device_timestamp': 'not recorded (timestamp_device_* keys are not written)',

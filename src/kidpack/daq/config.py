@@ -18,7 +18,7 @@ TRIGGER_MODES = ('edge', 'random')
 BACKENDS = ('niscope', 'simulator')
 
 DEFAULT_TIME_WINDOW = 2e-6  # s
-DEFAULT_SG_RESOURCE = 'PXI1Slot3'
+DEFAULT_SG_RESOURCE = 'PXI2Slot3'
 SUMMARY_FILE_NAME = 'run_summary.txt'
 
 

@@ -18,6 +18,7 @@ from kidpack.daq.backends.base import DaqError
 from kidpack.daq.backends.nirfsg_backend import NiRfsgBackend
 from kidpack.daq.backends.niscope_backend import NiScopeBackend
 from kidpack.daq.config import ChannelConfig, DaqConfig, TriggerConfig
+from fake_nirfsg import make_fake_nirfsg
 
 
 def make_fake_niscope(record_len=6000):
@@ -235,29 +236,118 @@ def test_close_is_idempotent(ni):
     assert ni.calls.count(('close',)) == 1
 
 
-def test_sg_backend_follows_iq_scan_py(monkeypatch):
-    calls = []
+# --- signal generator: the calls of the verified macro iq_scan_kimura20260703.py ----------
 
-    class PXIe_5654:
-        def __init__(self, resource):
-            calls.append(('open', resource))
-
-        def __setattr__(self, name, value):
-            calls.append(('set', name, value))
-
-        def initiate(self):
-            calls.append(('initiate',))
-
-        def abort(self):
-            calls.append(('abort',))
-
-    fake = types.ModuleType('nirfsg')
-    fake.PXIe_5654 = PXIe_5654
+@pytest.fixture
+def rfsg(monkeypatch):
+    fake = make_fake_nirfsg()
     monkeypatch.setitem(sys.modules, 'nirfsg', fake)
+    return fake
 
-    sg = NiRfsgBackend('PXI1Slot3')
-    sg.start(5.49e9, -12.0)
+
+def test_creating_the_backend_opens_the_device_once_to_check_it_and_reads_its_model(rfsg):
+    sg = NiRfsgBackend('PXI2Slot3')
+    assert rfsg.calls == [('open', 'PXI2Slot3', True, True), ('close',)]
+    assert sg.info == {'instrument_model': 'PXIe-5654', 'specific_driver_revision': 'NI-RFSG 24.5'}
+    assert 'nirfsg.Session' in sg.api
+
+
+def test_start_and_stop_make_the_calls_of_the_macro_in_its_order(rfsg):
+    sg = NiRfsgBackend('PXI2Slot3')
+    rfsg.calls.clear()
+
+    sg.start(5.49e9, -2.0)
+    assert rfsg.calls == [
+        ('open', 'PXI2Slot3', True, True),  # Session(resource, id_query=True, reset_device=True)
+        ('set', 'generation_mode', rfsg.GenerationMode.CW),
+        ('configure_rf', 5.49e9, -2.0),
+        ('set', 'output_enabled', True),
+        ('initiate',),
+    ]
+    rfsg.calls.clear()
     sg.stop()
-    sg.close()  # the site module may have no close(); must not fail
-    assert calls == [('open', 'PXI1Slot3'), ('set', 'rf_frequency', 5.49e9),
-                     ('set', 'rf_power', -12.0), ('initiate',), ('abort',)]
+    assert rfsg.calls == [('abort',), ('close',)]  # rfsg.abort(), then leaving the with-block
+
+
+def test_the_driver_lock_is_replaced_by_a_no_op_like_in_the_macro(rfsg):
+    sg = NiRfsgBackend('PXI2Slot3')
+    sg.start(5.49e9, -2.0)
+    for session in rfsg.sessions:  # the one of the check and the one of the start
+        with session.lock():  # would raise AssertionError if it were still the driver's lock
+            pass
+    sg.stop()
+
+
+def test_every_frequency_gets_a_freshly_reset_session(rfsg):
+    sg = NiRfsgBackend('PXI2Slot3')
+    rfsg.calls.clear()
+    for frequency in (5.30e9, 5.31e9, 5.32e9):
+        sg.start(frequency, -2.0)
+        sg.stop()
+    assert rfsg.calls.count(('open', 'PXI2Slot3', True, True)) == 3
+    assert rfsg.calls.count(('abort',)) == rfsg.calls.count(('close',)) == 3
+    assert [c[1:] for c in rfsg.calls if c[0] == 'configure_rf'] == [
+        (5.30e9, -2.0), (5.31e9, -2.0), (5.32e9, -2.0)]
+
+
+def test_starting_again_first_stops_the_previous_session(rfsg):
+    sg = NiRfsgBackend('PXI2Slot3')
+    sg.start(5.30e9, -2.0)
+    rfsg.calls.clear()
+    sg.start(5.31e9, -2.0)
+    assert rfsg.calls[:3] == [('abort',), ('close',), ('open', 'PXI2Slot3', True, True)]
+
+
+@pytest.mark.parametrize('failing', ['configure_rf', 'initiate'])
+def test_a_failed_start_closes_the_session_and_raises(monkeypatch, failing):
+    fake = make_fake_nirfsg(fail=failing)
+    monkeypatch.setitem(sys.modules, 'nirfsg', fake)
+    sg = NiRfsgBackend('PXI2Slot3')
+    fake.calls.clear()
+    with pytest.raises(RuntimeError, match=failing):
+        sg.start(5.49e9, -2.0)
+    assert fake.calls[-1] == ('close',)  # no session is left open
+    fake.calls.clear()
+    sg.stop()
+    assert fake.calls == []  # nothing is running, nothing to abort
+
+
+def test_stop_closes_the_session_even_if_abort_fails(monkeypatch):
+    fake = make_fake_nirfsg(fail='abort')
+    monkeypatch.setitem(sys.modules, 'nirfsg', fake)
+    sg = NiRfsgBackend('PXI2Slot3')
+    sg.start(5.49e9, -2.0)
+    with pytest.raises(RuntimeError, match='abort'):
+        sg.stop()
+    assert fake.calls[-1] == ('close',)
+
+
+def test_close_stops_a_running_generator_and_is_idempotent(rfsg):
+    sg = NiRfsgBackend('PXI2Slot3')
+    sg.start(5.49e9, -2.0)
+    rfsg.calls.clear()
+    sg.close()
+    sg.close()
+    assert rfsg.calls == [('abort',), ('close',)]
+
+
+def test_unreadable_model_information_does_not_stop_anything(monkeypatch):
+    fake = make_fake_nirfsg(unreadable=('specific_driver_revision',))
+    monkeypatch.setitem(sys.modules, 'nirfsg', fake)
+    sg = NiRfsgBackend('PXI2Slot3')
+    assert sg.info == {'instrument_model': 'PXIe-5654'}
+    sg.start(5.49e9, -2.0)
+
+
+def test_a_device_that_cannot_be_opened_is_reported_when_the_backend_is_created(monkeypatch):
+    fake = make_fake_nirfsg(fail='open')
+    monkeypatch.setitem(sys.modules, 'nirfsg', fake)
+    with pytest.raises(RuntimeError, match='device not found'):
+        NiRfsgBackend('PXI2Slot3')
+    assert fake.calls == [('open', 'PXI2Slot3', True, True)]
+
+
+def test_a_missing_nirfsg_package_is_explained(monkeypatch):
+    monkeypatch.setitem(sys.modules, 'nirfsg', None)  # import raises ImportError
+    with pytest.raises(ImportError, match='pip install nirfsg'):
+        NiRfsgBackend('PXI2Slot3')

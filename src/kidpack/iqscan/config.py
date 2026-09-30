@@ -1,7 +1,8 @@
 """IQ-scan configuration and command-line parsing.
 
-The defaults reproduce the values hard-coded in the seed ``iq_scan.py``; the
-frequency range has no default (it depends on the resonator) and is required.
+The defaults are the values of the macro ``iq_scan_kimura20260703.py``, which is
+known to work; the frequency range has no default (it depends on the resonator)
+and is required.
 """
 import os
 from dataclasses import asdict, dataclass, field
@@ -12,7 +13,7 @@ import numpy as np
 from kidpack.daq.config import (BACKENDS, DEFAULT_SG_RESOURCE, VERTICAL_COUPLINGS,
                                 ChannelConfig, KidParser, default_output_dir)
 
-DEFAULT_TIME_WINDOW = 0.5  # s
+DEFAULT_TIME_WINDOW = 1.0  # s
 SUMMARY_FILE_NAME = 'iqscan_summary.txt'
 
 
@@ -27,7 +28,7 @@ class IqScanConfig:
     f_start: float  # Hz
     f_stop: float  # Hz
     num_points: int  # frequencies, both ends included
-    power: float = -10.0  # dBm at the signal generator
+    power: float = -2.0  # dBm at the signal generator
     settle_time: float = 0.0  # s between starting the SG and acquiring
     # output
     output_dir: str = field(default_factory=default_scan_dir)
@@ -39,13 +40,13 @@ class IqScanConfig:
     resource: str = 'PXI2Slot2'  # digitizer
     sg_resource: str = DEFAULT_SG_RESOURCE
     sample_rate: float = 1e4  # Hz
-    npts: int = 5000  # samples per record (0.5 s at 10 kS/s)
+    npts: int = 10000  # samples per record (1 s at 10 kS/s)
     num_records: int = 2
     ref_position: float = 50.0  # %
-    impedance: float = 50.0  # ohm
+    impedance: float = 1e6  # ohm
     fetch_timeout: float = 17.0  # s
-    ch0: ChannelConfig = field(default_factory=lambda: ChannelConfig(vertical_range=0.1))
-    ch1: ChannelConfig = field(default_factory=lambda: ChannelConfig(vertical_range=0.1))
+    ch0: ChannelConfig = field(default_factory=lambda: ChannelConfig(vertical_range=1.0))
+    ch1: ChannelConfig = field(default_factory=lambda: ChannelConfig(vertical_range=1.0))
 
     @property
     def summary_path(self):

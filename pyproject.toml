@@ -23,9 +23,8 @@ kidpack-iqscan = "kidpack.iqscan.cli:main"
 kidpack-iqplot = "kidpack.iqscan.plot:main"
 
 [project.optional-dependencies]
-# NI-SCOPE driver bindings for the DAQ PC. The signal generator needs the
-# site-specific `nirfsg` module (PXIe_5654); do not install PyPI's `nirfsg`.
-daq = ["niscope"]
+# NI driver bindings for the DAQ PC (they also need the NI-SCOPE / NI-RFSG drivers)
+daq = ["niscope", "nirfsg"]
 vacuum = ["pyserial"]
 dev = ["pytest", "pyserial"]
 

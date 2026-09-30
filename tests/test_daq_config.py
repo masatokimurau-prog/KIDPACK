@@ -119,7 +119,7 @@ def test_summary_path_defaults_to_output_dir():
 
 def test_sg_is_optional_but_all_or_nothing():
     cfg = parse('--sg-frequency', '5.49e9', '--sg-power', '-12')
-    assert (cfg.sg.frequency, cfg.sg.power, cfg.sg.resource) == (5.49e9, -12, 'PXI1Slot3')
+    assert (cfg.sg.frequency, cfg.sg.power, cfg.sg.resource) == (5.49e9, -12, 'PXI2Slot3')
     assert parse('--sg-frequency', '5e9', '--sg-power', '0', '--sg-resource', 'PXI1Slot5').sg.resource == 'PXI1Slot5'
     for bad in (['--sg-frequency', '5e9'], ['--sg-power', '-10'], ['--sg-resource', 'PXI1Slot5']):
         with pytest.raises(SystemExit):

@@ -1,9 +1,10 @@
-"""Digitizer backends of the IQ scan (the SG backends are shared with the pulse DAQ).
+"""Digitizer backends of the IQ scan (the SG backend is shared with the pulse DAQ).
 
-The NI-SCOPE calls, their order and their arguments follow the seed
-``iq_scan.py``: one ``initiate()`` per frequency acquires ``num_records`` records
-of both channels immediately (no trigger), and the mean over all samples of all
-records is the I (ch0) / Q (ch1) value of that frequency.
+The NI-SCOPE calls, their order and their arguments follow the macro
+``iq_scan_kimura20260703.py``, which is known to work: one ``initiate()`` per
+frequency acquires ``num_records`` records of both channels with the driver's
+default trigger (immediate), and the mean over all samples of all records is the
+I (ch0) / Q (ch1) value of that frequency.
 """
 import abc
 import logging
@@ -76,8 +77,7 @@ class NiScopeIqBackend(IqScopeBackend):
                 offset=ch.offset)
         for index in (0, 1):
             s.channels[index].input_impedance = cfg.impedance
-        # iq_scan.py leaves the driver's default (immediate) trigger; say so explicitly
-        s.configure_trigger_immediate()
+        # no trigger is configured: the driver's default (immediate) is what the macro relies on
         return self._read_back()
 
     def _read_back(self):

@@ -29,6 +29,8 @@ class IqScanWriter:
         self.cfg = cfg
         self.timestamp_source = timestamp_source
         self.command_line = list(command_line) if command_line is not None else None
+        self.sg_api = None  # how the signal generator is driven (set by the runner)
+        self.sg_info = {}  # its model / driver revision if known (set by the runner)
         stem = cfg.name or 'iqscan_' + datetime.fromtimestamp(time.time()).strftime('%Y%m%d%H%M')
         self.stem = stem
         self.npz_path = os.path.join(cfg.output_dir, stem + '.npz')
@@ -83,13 +85,15 @@ class IqScanWriter:
             'digitizer': {
                 'resource': cfg.resource, 'sample_rate': float(sample_rate), 'npts': cfg.npts,
                 'num_records': cfg.num_records, 'ref_position': cfg.ref_position,
-                'trigger': 'immediate', 'impedance': cfg.impedance,
+                'trigger': 'immediate (driver default)', 'impedance': cfg.impedance,
                 'fetch_timeout_s': cfg.fetch_timeout,
                 'channels': {name: {'vertical_range': ch.vertical_range, 'coupling': ch.coupling,
                                     'offset': ch.offset}
                              for name, ch in (('ch0', cfg.ch0), ('ch1', cfg.ch1))},
             },
-            'signal_generator': {'resource': cfg.sg_resource},
+            'signal_generator': {'resource': cfg.sg_resource,
+                                 **({'api': self.sg_api} if self.sg_api else {}),
+                                 **self.sg_info},
             'actual_settings': actual,
             'backend': cfg.backend,
             'timestamp_unix_ns_source': self.timestamp_source,

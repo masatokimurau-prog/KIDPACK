@@ -11,16 +11,16 @@ def parse(*extra, required=REQUIRED):
     return config_from_args(parser.parse_args([*required, *extra]), parser)
 
 
-def test_defaults_reproduce_the_seed_iq_scan_py():
+def test_defaults_are_those_of_the_verified_macro_iq_scan_kimura20260703():
     cfg = parse()
-    assert cfg.power == -10
-    assert cfg.sample_rate == 1e4 and cfg.npts == 5000  # 0.5 s at 10 kS/s
+    assert cfg.power == -2
+    assert cfg.sample_rate == 1e4 and cfg.npts == 10000  # 1 s at 10 kS/s
     assert cfg.num_records == 2 and cfg.ref_position == 50
-    assert cfg.ch0.vertical_range == cfg.ch1.vertical_range == 0.1
+    assert cfg.ch0.vertical_range == cfg.ch1.vertical_range == 1.0
     assert cfg.ch0.coupling == cfg.ch1.coupling == 'dc'
     assert cfg.ch0.offset == cfg.ch1.offset == 0.0
-    assert cfg.impedance == 50 and cfg.fetch_timeout == 17
-    assert cfg.resource == 'PXI2Slot2' and cfg.sg_resource == 'PXI1Slot3'
+    assert cfg.impedance == 1e6 and cfg.fetch_timeout == 17
+    assert cfg.resource == 'PXI2Slot2' and cfg.sg_resource == 'PXI2Slot3'
     assert cfg.settle_time == 0 and cfg.backend == 'niscope'
 
 

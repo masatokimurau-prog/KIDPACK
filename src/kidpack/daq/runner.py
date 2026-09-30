@@ -94,8 +94,11 @@ class _Run:
                 self.actual = self.scope.configure()
                 log.info('actual device settings: %s', json.dumps(self.actual))
                 if self.sg is not None:
+                    self.writer.sg_api = getattr(self.sg, 'api', None)
+                    self.writer.sg_info = dict(getattr(self.sg, 'info', None) or {})
                     self.sg.start(cfg.sg.frequency, cfg.sg.power)
-                    log.info('SG started: %g Hz, %g dBm', cfg.sg.frequency, cfg.sg.power)
+                    log.info('SG started: %g Hz, %g dBm (%s)', cfg.sg.frequency, cfg.sg.power,
+                             self.writer.sg_api or 'simulated')
                 for file_number in range(cfg.num_files):
                     self._acquire_file(file_number)
             except KeyboardInterrupt:

@@ -211,6 +211,18 @@ def test_edge_trigger_is_recorded_in_the_yaml(tmp_path):
         'slope': 'positive', 'coupling': 'lf_reject'}
 
 
+def test_how_the_generator_is_driven_is_recorded_in_the_yaml(tmp_path):
+    class NiLikeSg(SimulatedSg):
+        api = 'nirfsg.Session (CW, session reset and re-opened per start)'
+        info = {'instrument_model': 'PXIe-5654', 'specific_driver_revision': 'NI-RFSG 24.5'}
+
+    cfg = make_cfg(tmp_path, num_files=1, sg=SgConfig(5.49e9, -2.0, 'PXI2Slot3'))
+    run_daq(cfg, SimulatedScope(cfg, seed=1), NiLikeSg())
+    sg = load(str(tmp_path / 'run_07'), 'run07-00')[1]['sg']
+    assert sg == {'controlled_by_daq': True, 'frequency_hz': 5.49e9, 'power_dbm': -2.0,
+                  'resource': 'PXI2Slot3', 'api': NiLikeSg.api, **NiLikeSg.info}
+
+
 def test_actual_device_settings_replace_the_requested_ones_in_the_data_file(tmp_path):
     class CoercingScope(SimulatedScope):
         def configure(self):
@@ -253,5 +265,5 @@ def test_cli_reports_a_missing_driver_cleanly(tmp_path, capsys, monkeypatch):
     args = cli_args(tmp_path)
     args[args.index('--backend') + 1] = 'niscope'
     assert main(args) == 1
-    assert 'could not set up the niscope backend' in capsys.readouterr().err
+    assert 'could not set up the instruments' in capsys.readouterr().err
     assert not (tmp_path / 'run_03').exists()  # a failed start must not burn the run number

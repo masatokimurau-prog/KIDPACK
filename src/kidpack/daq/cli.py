@@ -26,7 +26,8 @@ def main(argv=None):
         print(f'error: {e}', file=sys.stderr)
         return 1
     except Exception as e:  # driver missing, device not found, ...
-        print(f'error: could not set up the {cfg.backend} backend: {type(e).__name__}: {e}',
+        print(f'error: could not set up the instruments ({cfg.backend} backend): '
+              f'{type(e).__name__}: {e}',
               file=sys.stderr)
         return 1
 
