@@ -223,7 +223,7 @@ def plot_resonance_and_trajectory(result):
     ax[1].set(xlabel='Frequency [GHz]', ylabel='|S21|', title='resonance curve')
     ax[2].set(xlabel='Frequency [GHz]', ylabel='arg S21 [rad]', title='resonance curve')
     for a_ in ax:
-        a_.grid()
+        a_.grid(True)
     ax[1].legend(fontsize='small')
     fig.tight_layout()
     return fig
@@ -259,7 +259,7 @@ def plot_time_response(result):
     ax[3, 1].set_ylabel('arg S21 [rad]')
 
     for axis in ax.flat:
-        axis.grid()
+        axis.grid(True)
         if axis.get_legend_handles_labels()[0]:
             axis.legend(fontsize='small')
     ax[3, 0].set_xlabel('Time [ns]')
@@ -303,7 +303,7 @@ def compare(name, values):
     ax_arg.set(xlabel='Time [ns]', ylabel='arg S21 [rad]')
     ax_peak.set(xlabel=name, ylabel='max |S21(t) - S21(0)|', title='size of the response')
     for axis in ax.flat:
-        axis.grid()
+        axis.grid(True)
     ax_re.legend(fontsize='small')
     fig.suptitle(f'comparison of {name}')
     fig.tight_layout()

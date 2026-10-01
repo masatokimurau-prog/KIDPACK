@@ -79,7 +79,7 @@ def plot_scan(scan, ref=None, db=False, wrap=False, make_figure=Figure):
         for ax in (ax_mag, ax_phase):
             ax.set_xlabel('Frequency [GHz]')
         for ax in (ax_iq, ax_mag, ax_phase):
-            ax.grid()
+            ax.grid(True)
 
         title = f'{scan.name}: {len(freq_ghz)} points, {freq_ghz[0]:.4f}-{freq_ghz[-1]:.4f} GHz'
         if scan.power_dbm is not None:

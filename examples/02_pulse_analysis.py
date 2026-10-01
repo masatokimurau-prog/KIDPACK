@@ -176,6 +176,6 @@ ax[1].hist(ch1_ped * 1e3, bins=50)
 ax[1].set_xlabel('ch1_ped [mV]')
 for a in ax:
     a.set_ylabel('Events')
-    a.grid()
+    a.grid(True)
 fig.tight_layout()
 plt.show()

@@ -154,7 +154,7 @@ def plot_iq_plane(view, make_figure=Figure):
             if k % NCOLS == 0:
                 ax.set_ylabel('Q [mV]')
             ax.set_title(f'Event #{view.event_id[k]}')
-            ax.grid()
+            ax.grid(True)
         axs.flat[0].legend(loc='best')
         fig.colorbar(image, ax=axs, label='time [µs]', shrink=0.6)
     return fig
@@ -183,6 +183,6 @@ def plot_waveforms(view, make_figure=Figure):
             if k % NCOLS == 0:
                 ax.set_ylabel('voltage [mV]')
             ax.set_title(f'Event #{view.event_id[k]}')
-            ax.grid()
+            ax.grid(True)
         axs.flat[0].legend(loc='best')
     return fig
