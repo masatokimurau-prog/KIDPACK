@@ -208,7 +208,7 @@ def test_edge_trigger_is_recorded_in_the_yaml(tmp_path):
     run_daq(cfg, SimulatedScope(cfg, seed=1))
     assert load(str(tmp_path / 'run_07'), 'run07-00')[1]['trigger'] == {
         'mode': 'edge', 'source': 'VAL_EXTERNAL', 'level': 2.2,
-        'slope': 'positive', 'coupling': 'lf_reject'}
+        'slope': 'positive', 'coupling': 'dc'}
 
 
 def test_how_the_generator_is_driven_is_recorded_in_the_yaml(tmp_path):

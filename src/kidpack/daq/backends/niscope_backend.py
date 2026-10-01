@@ -2,7 +2,7 @@
 
 The driver calls, their order and their arguments follow the original
 ``kid.py``; only the values come from the configuration instead of being
-hard-coded.
+hard-coded (the default trigger coupling is DC, the original had LF_REJECT).
 """
 import logging
 import time

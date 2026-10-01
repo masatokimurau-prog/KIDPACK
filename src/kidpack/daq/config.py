@@ -1,7 +1,8 @@
 """DAQ configuration and command-line parsing.
 
-The defaults reproduce the values that were hard-coded in the original
-``kid.py``; every one of them can be overridden from the command line.
+The defaults are the values that were hard-coded in the original ``kid.py``,
+except the trigger coupling (``dc`` here, ``LF_REJECT`` there); every one of
+them can be overridden from the command line.
 """
 import argparse
 import os
@@ -46,7 +47,7 @@ class TriggerConfig:
     source: str = 'VAL_EXTERNAL'
     level: float = 2.2  # V
     slope: str = 'positive'
-    coupling: str = 'lf_reject'
+    coupling: str = 'dc'
     # 'edge': wait for the trigger described by the fields above.
     # 'random': the DAQ itself issues a software trigger every `interval`
     # seconds (unbiased noise/baseline samples); the edge settings are unused.
@@ -215,16 +216,18 @@ def build_parser():
     g.add_argument('--trigger-level', type=float, default=_D.trigger.level, metavar='V',
                    help='trigger level [V] (default: %(default)g)')
     g.add_argument('--trigger-slope', choices=TRIGGER_SLOPES, default=_D.trigger.slope,
-                   help='(default: %(default)s)')
+                   help='edge slope that triggers (default: %(default)s)')
     g.add_argument('--trigger-coupling', choices=TRIGGER_COUPLINGS, default=_D.trigger.coupling,
-                   help='(default: %(default)s)')
+                   help='coupling of the trigger input (default: %(default)s)')
 
     g = p.add_argument_group('signal generator (optional)',
                              'Give --sg-frequency and --sg-power to have the DAQ set and start '
                              'the SG for the run (stopped at the end). Without them the SG is '
                              'not touched and can be configured externally.')
-    g.add_argument('--sg-frequency', type=float, default=None, metavar='HZ')
-    g.add_argument('--sg-power', type=float, default=None, metavar='DBM')
+    g.add_argument('--sg-frequency', type=float, default=None, metavar='HZ',
+                   help='signal generator frequency [Hz] (needs --sg-power)')
+    g.add_argument('--sg-power', type=float, default=None, metavar='DBM',
+                   help='signal generator power [dBm] (needs --sg-frequency)')
     g.add_argument('--sg-resource', default=None,
                    help=f'SG resource name (default: {DEFAULT_SG_RESOURCE})')
     return p

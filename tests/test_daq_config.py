@@ -12,7 +12,7 @@ def parse(*extra):
     return config_from_args(parser.parse_args([*REQUIRED, *extra]), parser)
 
 
-def test_defaults_reproduce_the_original_kid_py_values():
+def test_defaults_are_the_original_kid_py_values_except_the_trigger_coupling():
     cfg = parse()
     assert (cfg.run_number, cfg.events_per_file, cfg.num_files) == (3, 1000, 2)
     assert cfg.resource == 'PXI2Slot2'
@@ -25,7 +25,7 @@ def test_defaults_reproduce_the_original_kid_py_values():
     assert cfg.impedance == 50
     assert cfg.bandwidth == -1
     assert (cfg.trigger.source, cfg.trigger.level) == ('VAL_EXTERNAL', 2.2)
-    assert (cfg.trigger.slope, cfg.trigger.coupling) == ('positive', 'lf_reject')
+    assert (cfg.trigger.slope, cfg.trigger.coupling) == ('positive', 'dc')  # kid.py had LF_REJECT
     assert cfg.fetch_timeout == 100
     assert cfg.sg is None
     assert cfg.backend == 'niscope'
@@ -93,6 +93,7 @@ def test_random_trigger_defaults_to_once_per_second():
     ['--random-trigger', '--trigger-level', '1.0'],  # edge settings are meaningless
     ['--random-trigger', '--trigger-source', '1'],
     ['--random-trigger', '--trigger-slope', 'negative'],
+    ['--random-trigger', '--trigger-coupling', 'lf_reject'],  # not the default (dc) any more
     ['--random-trigger', '--random-trigger-interval', '0'],
 ])
 def test_random_trigger_option_conflicts(bad):
@@ -137,3 +138,9 @@ def test_invalid_values_are_rejected(bad):
     # later occurrences of an option override earlier ones
     with pytest.raises(SystemExit):
         config_from_args(parser.parse_args(args), parser)
+
+
+def test_the_trigger_coupling_can_still_be_set_to_every_value_and_defaults_to_dc():
+    assert parse().trigger.coupling == 'dc'
+    for value in ('lf_reject', 'hf_reject', 'dc', 'ac', 'ac_plus_hf_reject'):
+        assert parse('--trigger-coupling', value).trigger.coupling == value

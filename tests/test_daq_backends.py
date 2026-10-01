@@ -109,10 +109,10 @@ def default_cfg(**kw):
     return DaqConfig(run_number=1, events_per_file=1, num_files=1, **kw)
 
 
-def test_default_configuration_issues_the_same_calls_as_kid_py(ni):
+def test_default_configuration_issues_the_calls_of_kid_py_except_the_trigger_coupling_is_dc(ni):
     backend = NiScopeBackend(default_cfg())
     backend.configure()
-    dc, lf, pos = ni.VerticalCoupling.DC, ni.TriggerCoupling.LF_REJECT, ni.TriggerSlope.POSITIVE
+    dc, trigger_dc, pos = ni.VerticalCoupling.DC, ni.TriggerCoupling.DC, ni.TriggerSlope.POSITIVE
     assert ni.calls == [
         ('open', 'PXI2Slot2'),
         ('configure_vertical', 0, 0.01, dc), ('set', 0, 'vertical_offset', 0.0),
@@ -122,7 +122,7 @@ def test_default_configuration_issues_the_same_calls_as_kid_py(ni):
         ('horizontal', dict(min_sample_rate=2.5e9, min_num_pts=5000, ref_position=20.0,
                             num_records=1, enforce_realtime=True)),
         ('trigger', dict(trigger_source='VAL_EXTERNAL', level=2.2,
-                         trigger_coupling=lf, slope=pos)),
+                         trigger_coupling=trigger_dc, slope=pos)),
     ]
 
 

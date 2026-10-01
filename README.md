@@ -17,7 +17,8 @@ pytest
 
 `kidpack-daq` (or `python -m kidpack.daq`) acquires waveforms from the NI-SCOPE
 digitizer. Every setting that was hard-coded in the old `kid.py` is an option
-(`kidpack-daq --help`); the defaults reproduce the old values.
+(`kidpack-daq --help`); the defaults are the old values, except the trigger
+coupling, which is `dc` (it was `LF_REJECT`).
 
 ```bash
 pip install -e ".[daq]"     # on the DAQ PC (adds only the niscope binding; see below)
@@ -144,6 +145,15 @@ notch resonator and compares it for different parameters; `02_pulse_analysis.py`
 analyses a waveform file (pedestal, peak, half-max times, integral; rebin 5) and
 histograms the pedestals.
 
+## All options
+
+[`docs/OPTIONS.md`](docs/OPTIONS.md) lists every option of `kidpack-daq`, `kidpack-monitor`,
+`kidpack-iqscan` and `kidpack-iqplot` with its allowed values, default and meaning, plus
+the rules between options. It is generated from the real argument parsers
+(`python -m kidpack.optionsdoc --output docs/OPTIONS.md`) and a test fails if it is out
+of date or if an allowed value is wrong, so it can be trusted; `<command> --help` shows the
+same information in the terminal.
+
 ## Layout
 
 ```
@@ -151,6 +161,7 @@ src/kidpack/       package source (daq/: pulse DAQ, iqscan/: IQ scan,
                    monitor/: online check; rawdata.py: raw-file reader)
 scripts/           stand-alone measurement scripts (VacuumGauge/read.py)
 examples/          sample macros for students (stand-alone, see examples/README.md)
+docs/              OPTIONS.md: all command-line options (generated)
 tests/             pytest tests
 data/              DAQ output (created by kidpack-daq, not tracked by git)
 ```
