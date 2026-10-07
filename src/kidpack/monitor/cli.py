@@ -11,6 +11,7 @@ from kidpack.monitor.pulses import (DEFAULT_REBIN, N_EVENTS, SAVE_DPI, SHOW_FIGS
                                     make_pulse_view, plot_iq_plane, plot_waveforms,
                                     select_events)
 from kidpack.rawdata import RawDataError, load_raw
+from kidpack.runs import file_number_arg, find_run_file, run_number_arg
 
 
 def find_latest_raw_file(data_dir):
@@ -30,6 +31,11 @@ def build_parser():
                     f'windows (close them to exit). The data is only read.')
     p.add_argument('file', nargs='?',
                    help='raw .npz file (default: the newest one under --data-dir)')
+    p.add_argument('--run-number', type=run_number_arg, default=None, metavar='N|test',
+                   help='instead of FILE: the file of this run under --data-dir (run_XX/data/runXX-YY.npz); '
+                        'with --file-number that file, otherwise the one with the highest file number')
+    p.add_argument('--file-number', type=file_number_arg, default=None, metavar='M',
+                   help='file number YY within the run given by --run-number')
     p.add_argument('--data-dir', default=default_output_dir(),
                    help="where to look for the newest file (default: %s)"
                         % default_output_dir().replace('%', '%%'))
@@ -55,7 +61,19 @@ def main(argv=None):
     if args.rebin < 1 or args.stride < 1:
         parser.error('--rebin and --stride must be >= 1')
 
-    path = args.file or find_latest_raw_file(args.data_dir)
+    if args.file and (args.run_number is not None or args.file_number is not None):
+        parser.error('give either FILE or --run-number / --file-number, not both')
+    if args.file_number is not None and args.run_number is None:
+        parser.error('--file-number needs --run-number')
+
+    if args.run_number is not None:
+        try:
+            path = find_run_file(args.data_dir, args.run_number, args.file_number)
+        except FileNotFoundError as e:
+            print(f'error: {e}', file=sys.stderr)
+            return 1
+    else:
+        path = args.file or find_latest_raw_file(args.data_dir)
     if path is None:
         print(f'error: no raw file found under {args.data_dir}', file=sys.stderr)
         return 1

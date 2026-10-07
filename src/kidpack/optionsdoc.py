@@ -57,6 +57,8 @@ ALLOWED = {
     ('kidpack-daq', '--sg-resource'): 'resource name (only with `--sg-frequency` and `--sg-power`)',
     # ---- kidpack-monitor ----
     ('kidpack-monitor', 'file'): 'path of a raw `.npz` file',
+    ('kidpack-monitor', '--run-number'): 'integer, 0 or more; or `test`',
+    ('kidpack-monitor', '--file-number'): 'integer, 0 or more (needs `--run-number`)',
     ('kidpack-monitor', '--data-dir'): 'directory path',
     ('kidpack-monitor', '--output-dir'): 'directory path',
     ('kidpack-monitor', '--rebin'): 'integer, 1 or more',
@@ -107,7 +109,11 @@ RULES = {
         '`--trigger-slope` or `--trigger-coupling` set to something else than their default.',
     ],
     'kidpack-monitor': [
-        'Without `file`, the newest `run*-*.npz` under `--data-dir` is used.',
+        'The file is chosen in this order: `file`; or `--run-number` (with `--file-number`: '
+        '`<data-dir>/run_XX/data/runXX-YY.npz`, without it the file with the highest file number of '
+        'that run); or, with none of them, the newest `run*-*.npz` under `--data-dir`.',
+        '`file` and `--run-number` / `--file-number` cannot be given together; `--file-number` needs '
+        '`--run-number`.',
     ],
     'kidpack-iqscan': [
         '`--time-window` and `--npts` cannot be given together.',

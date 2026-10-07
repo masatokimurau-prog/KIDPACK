@@ -86,6 +86,8 @@ Online check of a raw NPZ file: pc1 (IQ plane) and pc2 (waveforms) of 16 events 
 | Option | Allowed values | Default | Meaning |
 |---|---|---|---|
 | `file` (positional) | path of a raw `.npz` file | - | raw .npz file (default: the newest one under --data-dir) |
+| `--run-number` `N\|test` | integer, 0 or more; or `test` | - | instead of FILE: the file of this run under --data-dir (run_XX/data/runXX-YY.npz); with --file-number that file, otherwise the one with the highest file number |
+| `--file-number` `M` | integer, 0 or more (needs `--run-number`) | - | file number YY within the run given by --run-number |
 | `--data-dir` | directory path | `<KIDPACK>/data` | where to look for the newest file |
 | `--output-dir` | directory path | `.` | where pc1.png and pc2.png are written |
 | `--rebin` `N` | integer, 1 or more | `5` | average N consecutive samples before locating the peak; the points in pc1 are these averages |
@@ -95,7 +97,8 @@ Online check of a raw NPZ file: pc1 (IQ plane) and pc2 (waveforms) of 16 events 
 
 ### Rules
 
-- Without `file`, the newest `run*-*.npz` under `--data-dir` is used.
+- The file is chosen in this order: `file`; or `--run-number` (with `--file-number`: `<data-dir>/run_XX/data/runXX-YY.npz`, without it the file with the highest file number of that run); or, with none of them, the newest `run*-*.npz` under `--data-dir`.
+- `file` and `--run-number` / `--file-number` cannot be given together; `--file-number` needs `--run-number`.
 
 ## kidpack-iqscan
 

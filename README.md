@@ -70,6 +70,9 @@ only read, never modified.
 
 ```bash
 kidpack-monitor                          # newest file under KIDPACK/data/, PNGs in the current directory
+kidpack-monitor --run-number 12 --file-number 3   # run_12/data/run12-03.npz, no path needed
+kidpack-monitor --run-number 12          # the file with the highest file number of run 12
+kidpack-monitor --run-number test --file-number 0
 kidpack-monitor path/to/run12-03.npz --output-dir /tmp/check --no-show
 kidpack-monitor --rebin 1 --alpha --stride 2   # no smoothing before the peak search
 ```

@@ -409,3 +409,80 @@ def test_rebin_1_reproduces_the_5_sample_averages_of_the_old_macro():
     xy = scatter_points(plot_iq_plane(view), 0)
     np.testing.assert_allclose(xy[:, 0], rebin(view.i[0], 5) * 1e3, rtol=1e-6)
     np.testing.assert_allclose(xy[:, 1], rebin(view.q[0], 5) * 1e3, rtol=1e-6)
+
+
+# --- choosing the file by run number and file number ----------------------------------------------
+
+def make_run_files(data_dir, run_number, num_files, events=20, npts=200):
+    cfg = DaqConfig(run_number=run_number, events_per_file=events, num_files=num_files,
+                    output_dir=str(data_dir), npts=npts)
+    run_daq(cfg, SimulatedScope(cfg, seed=3))
+
+
+def monitor(tmp_path, *args):
+    return main([*args, '--data-dir', str(tmp_path / 'data'), '--no-show', '--output-dir', str(tmp_path / 'out')])
+
+
+def test_run_number_and_file_number_are_enough_to_choose_a_file(tmp_path, capsys):
+    make_run_files(tmp_path / 'data', 3, 3)
+    make_run_files(tmp_path / 'data', 4, 2)
+    assert monitor(tmp_path, '--run-number', '3', '--file-number', '1') == 0
+    out = capsys.readouterr().out
+    assert str(tmp_path / 'data' / 'run_03' / 'data' / 'run03-01.npz') in out
+    for name in ('pc1.png', 'pc2.png'):
+        assert (tmp_path / 'out' / name).read_bytes()[:4] == b'\x89PNG'
+
+
+def test_with_only_a_run_number_the_highest_file_number_is_taken(tmp_path, capsys):
+    make_run_files(tmp_path / 'data', 3, 3)
+    assert monitor(tmp_path, '--run-number', '3') == 0
+    assert 'run03-02.npz' in capsys.readouterr().out
+
+
+def test_the_test_run_can_be_chosen_too(tmp_path, capsys):
+    make_run_files(tmp_path / 'data', 'test', 2)
+    assert monitor(tmp_path, '--run-number', 'test', '--file-number', '0') == 0
+    assert 'runtest-00.npz' in capsys.readouterr().out
+    assert monitor(tmp_path, '--run-number', 'test') == 0
+    assert 'runtest-01.npz' in capsys.readouterr().out
+
+
+def test_the_selection_leaves_the_data_alone_and_works_with_the_other_options(tmp_path, capsys):
+    make_run_files(tmp_path / 'data', 5, 1, events=40)
+    path = tmp_path / 'data' / 'run_05' / 'data' / 'run05-00.npz'
+    before = sha(path)
+    assert monitor(tmp_path, '--run-number', '5', '--file-number', '0', '--stride', '2', '--rebin', '4') == 0
+    assert 'events 0..30 (16)' in capsys.readouterr().out
+    assert sha(path) == before
+
+
+def test_missing_runs_and_files_are_reported_in_words(tmp_path, capsys):
+    make_run_files(tmp_path / 'data', 3, 2)
+    assert monitor(tmp_path, '--run-number', '9') == 1
+    assert 'no data of run 09' in capsys.readouterr().err
+    assert monitor(tmp_path, '--run-number', '3', '--file-number', '7') == 1
+    error = capsys.readouterr().err
+    assert 'file number 7 of run 03 not found' in error and '0, 1' in error
+    assert not (tmp_path / 'out').exists()  # nothing was plotted
+
+
+@pytest.mark.parametrize('args', [
+    ['--file-number', '1'],  # which run?
+    ['some.npz', '--run-number', '3'],  # a file AND a run
+    ['some.npz', '--run-number', '3', '--file-number', '1'],
+    ['some.npz', '--file-number', '1'],
+    ['--run-number', 'abc'], ['--run-number', 'Test'], ['--run-number', '-1'],
+    ['--run-number', '3', '--file-number', '-1'], ['--run-number', '3', '--file-number', 'x'],
+])
+def test_wrong_combinations_are_usage_errors(tmp_path, args):
+    with pytest.raises(SystemExit):
+        monitor(tmp_path, *args)
+
+
+def test_a_path_alone_and_no_arguments_work_as_before(tmp_path, capsys):
+    make_run_files(tmp_path / 'data', 3, 2)
+    path = tmp_path / 'data' / 'run_03' / 'data' / 'run03-00.npz'
+    assert monitor(tmp_path, str(path)) == 0
+    assert 'run03-00.npz' in capsys.readouterr().out
+    assert monitor(tmp_path) == 0  # the newest file under --data-dir
+    assert 'run03-' in capsys.readouterr().out

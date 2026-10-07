@@ -148,6 +148,9 @@ VALUES = {
     ('kidpack-daq', '--sg-resource'): v('--sg-resource', [], ['PXI2Slot3'], companions=['--sg-frequency', '5e9', '--sg-power', '0']),
     # kidpack-monitor
     ('kidpack-monitor', 'file'): {'bad': [], 'ok': [['some.npz']]},
+    ('kidpack-monitor', '--run-number'): v('--run-number', ['-1', 'abc', 'Test', '1.5'], ['0', '12', 'test']),
+    ('kidpack-monitor', '--file-number'): v('--file-number', ['-1', 'abc', '1.5'], ['0', '3'],
+                                            companions=['--run-number', '1']),
     ('kidpack-monitor', '--data-dir'): v('--data-dir', [], ['data']),
     ('kidpack-monitor', '--output-dir'): v('--output-dir', [], ['out']),
     ('kidpack-monitor', '--rebin'): v('--rebin', ['0', '-1', '2.5'], ['1', '5', '10']),
@@ -209,6 +212,8 @@ def test_every_choice_is_accepted_and_anything_else_is_rejected(accepted, comman
 RULE_CASES = [
     # (command, arguments that must be rejected, arguments that must be accepted)
     ('kidpack-daq', [], [[], ['--run-number', 'test'], ['--run-number', '4']]),  # the run number is optional
+    ('kidpack-monitor', [['--file-number', '1'], ['some.npz', '--run-number', '3'], ['some.npz', '--file-number', '1']],
+     [['--run-number', '3'], ['--run-number', '3', '--file-number', '1'], ['--run-number', 'test'], ['some.npz']]),
     ('kidpack-daq', [['--time-window', '1e-6', '--npts', '100']], [['--time-window', '1e-6'], ['--npts', '100']]),
     ('kidpack-daq', [['--sg-frequency', '5e9'], ['--sg-power', '0'], ['--sg-resource', 'X'],
                      ['--sg-resource', 'X', '--sg-power', '0']],
