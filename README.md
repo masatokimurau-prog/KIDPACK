@@ -158,9 +158,11 @@ histograms the pedestals.
 
 ## Sample data
 
-`sample_data/` (git-ignored, 344 MB) holds nine runs of the z-scan of 2026-08-31 (x = 4.0 mm, z = 6.90 ...
-5.50 mm), taken with the old DAQ macro and converted to the current raw-data format
-(`kidpack.legacy`). It is made from the old files, which are only read:
+`sample_data/` (git-ignored, 763 MB) holds 20 runs of 2026-08-31 taken with the old DAQ macro and
+converted to the current raw-data format (`kidpack.legacy`): the z-scans at x = 4.0 mm (9 points)
+and x = 3.5 mm (7 points) and the x-scan at z = 6.30 mm (5 points; its x = 3.50 mm file is the
+z = 6.30 mm file of the other z-scan, so it is one run). It is made from the old files, which are
+only read:
 
 ```bash
 python scripts/make_sample_data.py    # ../data/Aug31st/ -> sample_data/ (--old-data-dir, --output-dir)

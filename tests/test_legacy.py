@@ -244,10 +244,11 @@ def make_sample_data():
 
 
 def fake_old_directory(module, root, skip=None, extra=None):
-    """Tiny old files named like the nine z-scan files (a different second in each pattern)."""
+    """Tiny old files named like the 20 z-scan / x-scan files (a different second in each pattern)."""
     directory = root / 'Aug31st'
     directory.mkdir(parents=True)
-    for i, (pattern, _) in enumerate(module.SCANS):
+    patterns = {pattern for _, _, entries in module.SCANS for pattern, _ in entries}  # a file is in 1-2 scans
+    for i, pattern in enumerate(sorted(patterns)):
         if pattern == skip:
             continue
         name = pattern.split('/')[1].replace('?', '7').replace('*', '49.50Hz')
@@ -257,25 +258,59 @@ def fake_old_directory(module, root, skip=None, extra=None):
     return root
 
 
-def test_the_script_makes_nine_runs_in_time_order_with_the_z_positions(make_sample_data, tmp_path):
+# run number -> condition: the specification of sample_data/ (runs 1-9 are the z-scan at x = 4.0 mm
+# in time order, runs 10-20 the other files in time order; the 6.30 mm file of the z-scan at x = 3.5 mm
+# is also the 3.50 mm file of the x-scan, and is one run)
+EXPECTED_CONDITIONS = [
+    'z-scan at x = 4.0 mm, z = 6.15 mm', 'z-scan at x = 4.0 mm, z = 6.00 mm',
+    'z-scan at x = 4.0 mm, z = 5.85 mm', 'z-scan at x = 4.0 mm, z = 5.70 mm',
+    'z-scan at x = 4.0 mm, z = 6.90 mm', 'z-scan at x = 4.0 mm, z = 6.70 mm',
+    'z-scan at x = 4.0 mm, z = 6.50 mm', 'z-scan at x = 4.0 mm, z = 6.30 mm',
+    'z-scan at x = 4.0 mm, z = 5.50 mm',
+    'x-scan at z = 6.30 mm, x = 4.00 mm', 'x-scan at z = 6.30 mm, x = 3.65 mm',
+    'z-scan at x = 3.5 mm, z = 6.90 mm', 'z-scan at x = 3.5 mm, z = 6.70 mm',
+    'z-scan at x = 3.5 mm, z = 6.50 mm',
+    'z-scan at x = 3.5 mm, z = 6.30 mm; x-scan at z = 6.30 mm, x = 3.50 mm',
+    'z-scan at x = 3.5 mm, z = 6.00 mm', 'z-scan at x = 3.5 mm, z = 5.70 mm',
+    'x-scan at z = 6.30 mm, x = 3.20 mm', 'x-scan at z = 6.30 mm, x = 4.50 mm',
+    'z-scan at x = 3.5 mm, z = 5.50 mm',
+]
+
+
+def test_the_script_makes_twenty_runs_in_time_order_within_each_batch(make_sample_data, tmp_path):
     old_dir = fake_old_directory(make_sample_data, tmp_path / 'data')
     out = tmp_path / 'sample'
     make_sample_data.main(['--old-data-dir', str(old_dir), '--output-dir', str(out)])
 
     names = sorted(p.name for p in out.iterdir())
-    assert names == ['README.md', *(f'run_0{n}' for n in range(1, 10)), 'run_summary.txt']
+    assert names == ['README.md', *(f'run_{n:02d}' for n in range(1, 21)), 'run_summary.txt']
     rows = [line.split('\t') for line in (out / 'run_summary.txt').read_text(encoding='utf-8').splitlines()[1:]]
-    assert [(r[0], r[4]) for r in rows] == [
-        ('1', 'z-scan at x = 4.0 mm, z = 6.15 mm'), ('2', 'z-scan at x = 4.0 mm, z = 6.00 mm'),
-        ('3', 'z-scan at x = 4.0 mm, z = 5.85 mm'), ('4', 'z-scan at x = 4.0 mm, z = 5.70 mm'),
-        ('5', 'z-scan at x = 4.0 mm, z = 6.90 mm'), ('6', 'z-scan at x = 4.0 mm, z = 6.70 mm'),
-        ('7', 'z-scan at x = 4.0 mm, z = 6.50 mm'), ('8', 'z-scan at x = 4.0 mm, z = 6.30 mm'),
-        ('9', 'z-scan at x = 4.0 mm, z = 5.50 mm')]
-    for n in range(1, 10):
-        assert load_raw(out / f'run_0{n}' / 'data' / f'run0{n}-00.npz').nevents == 2
+    assert [(int(r[0]), r[4]) for r in rows] == list(enumerate(EXPECTED_CONDITIONS, start=1))
+    starts = [r[1] for r in rows]
+    assert starts[:9] == sorted(starts[:9]) and starts[9:] == sorted(starts[9:])  # time order in each batch
+    for n in range(1, 21):
+        assert load_raw(out / f'run_{n:02d}' / 'data' / f'run{n:02d}-00.npz').nevents == 2
 
+
+def test_the_file_in_two_scans_is_one_run_with_both_conditions(make_sample_data, tmp_path):
+    old_dir = fake_old_directory(make_sample_data, tmp_path / 'data')
+    make_sample_data.main(['--old-data-dir', str(old_dir), '--output-dir', str(tmp_path / 'sample')])
+    sources = [yaml.safe_load(p.read_text(encoding='utf-8'))['converted_from']['file']
+               for p in sorted((tmp_path / 'sample').glob('run_*/config/*.yaml'))]
+    assert len(sources) == len(set(sources)) == 20  # 9 + 7 + 5 entries, 21 patterns, one file twice
+    assert sources[14] == 'wf_260831_154947_49.50Hz.npz'
+
+
+def test_the_readme_lists_the_runs_and_the_caveats(make_sample_data, tmp_path):
+    old_dir = fake_old_directory(make_sample_data, tmp_path / 'data')
+    out = tmp_path / 'sample'
+    make_sample_data.main(['--old-data-dir', str(old_dir), '--output-dir', str(out)])
     readme = (out / 'README.md').read_text(encoding='utf-8')
-    assert '| 1 | 6.15 |' in readme and '| 9 | 5.50 |' in readme and 'UTC+9' in readme and '±1 秒' in readme
+    assert '| 1 | z-scan at x = 4.0 mm, z = 6.15 mm |' in readme
+    assert '| 15 | z-scan at x = 3.5 mm, z = 6.30 mm; x-scan at z = 6.30 mm, x = 3.50 mm |' in readme
+    assert '| 20 | z-scan at x = 3.5 mm, z = 5.50 mm |' in readme
+    assert 'run 1-9: z-scan at x = 4.0 mm; run 10-20: z-scan at x = 3.5 mm, x-scan at z = 6.30 mm' in readme
+    assert 'UTC+9' in readme and '±1 秒' in readme and '測定 20 点' in readme
     assert 'kidpack-monitor --data-dir sample_data --run-number 1' in readme
 
 
@@ -289,8 +324,18 @@ def test_the_script_does_not_overwrite_an_existing_sample_data(make_sample_data,
     assert tree_hashes(out) == before
 
 
+def test_a_partly_existing_output_is_refused_before_anything_is_written(make_sample_data, tmp_path):
+    old_dir = fake_old_directory(make_sample_data, tmp_path / 'data')
+    out = tmp_path / 'sample'
+    (out / 'run_15').mkdir(parents=True)  # in the second batch: the first would be written, then fail
+    with pytest.raises(FileExistsError, match='run_15'):
+        make_sample_data.main(['--old-data-dir', str(old_dir), '--output-dir', str(out)])
+    assert sorted(p.name for p in out.iterdir()) == ['run_15']
+
+
 def test_the_script_wants_exactly_one_file_per_pattern(make_sample_data, tmp_path):
-    missing = fake_old_directory(make_sample_data, tmp_path / 'a', skip=make_sample_data.SCANS[0][0])
+    first_pattern = make_sample_data.SCANS[0][2][0][0]
+    missing = fake_old_directory(make_sample_data, tmp_path / 'a', skip=first_pattern)
     with pytest.raises(SystemExit, match=r'matches 0 files'):
         make_sample_data.main(['--old-data-dir', str(missing), '--output-dir', str(tmp_path / 'o1')])
 
@@ -298,3 +343,11 @@ def test_the_script_wants_exactly_one_file_per_pattern(make_sample_data, tmp_pat
     with pytest.raises(SystemExit, match=r'matches 2 files'):
         make_sample_data.main(['--old-data-dir', str(twice), '--output-dir', str(tmp_path / 'o2')])
     assert not (tmp_path / 'o1').exists() and not (tmp_path / 'o2').exists()
+
+
+def test_a_file_in_scans_of_two_batches_is_refused(make_sample_data, monkeypatch, tmp_path):
+    old_dir = fake_old_directory(make_sample_data, tmp_path / 'data')
+    monkeypatch.setattr(make_sample_data, 'BATCHES', [[0, 1], [2]])  # the shared file is now in both
+    with pytest.raises(SystemExit, match='two batches'):
+        make_sample_data.main(['--old-data-dir', str(old_dir), '--output-dir', str(tmp_path / 'o')])
+    assert not (tmp_path / 'o').exists()
