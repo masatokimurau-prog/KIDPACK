@@ -9,3 +9,4 @@ dist/
 .pytest_cache/
 .ipynb_checkpoints/
 data/
+sample_data/

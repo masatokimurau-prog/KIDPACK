@@ -156,6 +156,21 @@ notch resonator and compares it for different parameters; `02_pulse_analysis.py`
 analyses a waveform file (pedestal, peak, half-max times, integral; rebin 5) and
 histograms the pedestals.
 
+## Sample data
+
+`sample_data/` (git-ignored, 344 MB) holds nine runs of the z-scan of 2026-08-31 (x = 4.0 mm, z = 6.90 ...
+5.50 mm), taken with the old DAQ macro and converted to the current raw-data format
+(`kidpack.legacy`). It is made from the old files, which are only read:
+
+```bash
+python scripts/make_sample_data.py    # ../data/Aug31st/ -> sample_data/ (--old-data-dir, --output-dir)
+kidpack-monitor --data-dir sample_data --run-number 1
+```
+
+The start of each run is known only from the old file name (to the second, taken as UTC+9), so
+absolute times are good to +-1 s; times between events are exact. `sample_data/README.md` (written by
+the script) has the run / z table and the list of changes.
+
 ## All options
 
 [`docs/OPTIONS.md`](docs/OPTIONS.md) lists every option of `kidpack-daq`, `kidpack-monitor`,
@@ -169,9 +184,11 @@ same information in the terminal.
 
 ```
 src/kidpack/       package source (daq/: pulse DAQ, iqscan/: IQ scan,
-                   monitor/: online check; rawdata.py: raw-file reader)
-scripts/           stand-alone measurement scripts (VacuumGauge/read.py)
+                   monitor/: online check; rawdata.py: raw-file reader;
+                   legacy.py: converter of old DAQ-macro files)
+scripts/           stand-alone scripts (VacuumGauge/read.py, make_sample_data.py)
 examples/          sample macros for students (stand-alone, see examples/README.md)
+sample_data/       old z-scan data in the current format (made by scripts/make_sample_data.py, not tracked)
 docs/              OPTIONS.md: all command-line options (generated)
 tests/             pytest tests
 data/              DAQ output (created by kidpack-daq, not tracked by git)
