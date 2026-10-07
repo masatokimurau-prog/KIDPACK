@@ -4,7 +4,6 @@ import hashlib
 import importlib.util
 import runpy
 import sys
-import warnings
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -32,7 +31,7 @@ def settings(toy, **changes):
 
 @pytest.mark.parametrize('path', sorted(EXAMPLES.glob('[0-9][0-9]_*.py')), ids=lambda p: p.name)
 def test_every_example_is_a_stand_alone_macro(path):
-    """Only standard-library / numpy / scipy / matplotlib: no kidpack, no local helper files."""
+    """Only numpy / matplotlib (and a little standard library): no scipy, no kidpack, no local helpers."""
     tree = ast.parse(path.read_text(encoding='utf-8'))
     imported = set()
     for node in ast.walk(tree):
@@ -40,8 +39,8 @@ def test_every_example_is_a_stand_alone_macro(path):
             imported |= {alias.name.split('.')[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom):
             imported.add(node.module.split('.')[0])
-    standard = {'sys', 'os', 'math', 'warnings'}  # (small) part of the standard library
-    assert imported <= standard | {'numpy', 'scipy', 'matplotlib'}, imported
+    standard = {'sys', 'os', 'math'}  # (small) part of the standard library
+    assert imported <= standard | {'numpy', 'matplotlib'}, imported
 
 
 # --- the S21 formula ------------------------------------------------------------------
@@ -99,24 +98,50 @@ def test_the_temperature_model_reproduces_the_reference_macro(toy):
 
 # --- the simulation -----------------------------------------------------------------------
 
+def t_peak(tau_rise=50.0, tau_decay=200.0):
+    """Time of the maximum of exp(-t/tau_decay) - exp(-t/tau_rise)."""
+    return np.log(tau_rise / tau_decay) / (1 / tau_decay - 1 / tau_rise)
+
+
 def test_the_temperature_pulse_starts_and_ends_at_the_base_temperature(toy):
-    r = toy.simulate(**settings(toy, T_base=5.5, T_hot=7.0))
+    r = toy.simulate(**settings(toy, T_base=5.5, delta_T=1.5))
     assert r['T'][0] == pytest.approx(5.5)
     assert r['T'][-1] == pytest.approx(5.5, abs=0.02)  # 1.5 K x e^-5 is left after 1000 ns
-    t_peak = toy.time_of_peak(50, 200)
-    assert abs(np.argmax(r['T']) - t_peak) <= 1
-    expected_peak = 5.5 + 1.5 * (np.exp(-t_peak / 200) - np.exp(-t_peak / 50))
+    assert abs(np.argmax(r['T']) - t_peak()) <= 1
+    expected_peak = 5.5 + 1.5 * (np.exp(-t_peak() / 200) - np.exp(-t_peak() / 50))
     assert r['T'].max() == pytest.approx(expected_peak, abs=1e-3)  # lower than T_hot: finite rise time
+    assert r['settings']['T_hot'] == pytest.approx(7.0)  # T_hot = T_base + delta_T
 
 
-def test_at_rest_s21_is_that_of_the_resonator_at_the_base_temperature(toy):
+def test_the_pulse_is_the_same_whatever_the_base_temperature(toy):
+    shapes = [toy.simulate(**settings(toy, T_base=T_base, delta_T=0.5))['T'] - T_base
+              for T_base in (4.5, 5.5, 6.5)]
+    np.testing.assert_allclose(shapes[0], shapes[1], atol=1e-12)
+    np.testing.assert_allclose(shapes[2], shapes[1], atol=1e-12)
+
+
+def test_the_readout_is_tuned_to_the_resonance_at_the_base_temperature_by_default(toy):
     r = toy.simulate(**settings(toy))
+    assert toy.SETTINGS['f_readout'] is None
+    assert r['settings']['f_readout'] == pytest.approx(toy.fr_T(5.5))  # 5.3803 GHz
+    assert r['s21'][0] == pytest.approx(1 - toy.Ql_T(5.5) / toy.Qc_T(5.5))  # on resonance: the bottom of the dip
+    for T_base in (4.5, 6.5):  # ... at every base temperature
+        r = toy.simulate(**settings(toy, T_base=T_base))
+        assert r['settings']['f_readout'] == pytest.approx(toy.fr_T(T_base))
+        assert r['s21'][0] == pytest.approx(1 - toy.Ql_T(T_base) / toy.Qc_T(T_base))
+
+
+def test_a_given_readout_frequency_is_kept(toy):
+    r = toy.simulate(**settings(toy, f_readout=5.38e9))
+    assert r['settings']['f_readout'] == 5.38e9
     rest = toy.s21_notch(5.38e9, toy.fr_T(5.5), toy.Ql_T(5.5), toy.Qc_T(5.5))
     assert r['s21'][0] == pytest.approx(rest)
+    # and it stays there when the base temperature changes
+    assert toy.simulate(**settings(toy, T_base=4.5, f_readout=5.38e9))['settings']['f_readout'] == 5.38e9
 
 
 def test_no_pulse_no_response(toy):
-    r = toy.simulate(**settings(toy, T_hot=5.5))
+    r = toy.simulate(**settings(toy, delta_T=0.0))
     np.testing.assert_allclose(r['s21'], r['s21'][0])
     assert toy.peak_response(r) == pytest.approx(0.0, abs=1e-12)
 
@@ -144,70 +169,67 @@ def test_ql_and_qc_are_constant_unless_they_are_asked_to_follow_the_temperature(
 
 
 def test_a_pulse_that_would_break_the_superconductor_is_refused(toy):
-    with pytest.raises(ValueError, match='T_hot'):
-        toy.simulate(**settings(toy, T_hot=30.0))
+    with pytest.raises(ValueError, match='delta_T'):
+        toy.simulate(**settings(toy, delta_T=30.0))
+    with pytest.raises(ValueError, match='T_base'):
+        toy.simulate(**settings(toy, T_base=9.1, delta_T=1.0))
 
 
-# --- the decay-time fit -------------------------------------------------------------------
-
-def test_the_fit_recovers_an_exponential_whatever_its_size(toy):
-    t = np.arange(1000.0)
-    for amplitude in (1.0, 1e-3, 1e-9):
-        y = amplitude * (3 * np.exp(-t / 150) + 2)
-        tau, curve = toy.decay_fit(t, y, 100, tau_guess=200)
-        assert tau == pytest.approx(150, rel=1e-3)
-        np.testing.assert_allclose(curve, y[t > 100], rtol=1e-3, atol=1e-12 * amplitude)
-
-
-def test_the_fit_says_so_when_there_is_no_exponential_decay(toy):
-    t = np.arange(1000.0)
-    for y in (np.ones(1000), 1e-3 * t):  # flat, or a straight line
-        tau, curve = toy.decay_fit(t, y, 100, tau_guess=200)
-        assert np.isnan(tau) and curve is None
-
-
-def test_a_degenerate_fit_does_not_print_scipy_warnings_at_the_students(toy):
-    r = toy.simulate(**settings(toy, T_hot=7.0))  # its Imag tail is not a single exponential
-    with warnings.catch_warnings():
-        warnings.simplefilter('error')  # any warning becomes a failure
-        tau, curve = toy.decay_fit(r['t'], r['s21'].imag, 2 * toy.time_of_peak(50, 200), 200)
-    assert np.isnan(tau) and curve is None
-
-
-def test_in_the_linear_regime_the_imaginary_part_decays_with_the_input_time_constant(toy):
-    r = toy.simulate(**settings(toy, T_hot=5.55))  # a tiny pulse: the response is proportional to it
-    tau = toy.decay_fit(r['t'], r['s21'].imag, 2 * toy.time_of_peak(50, 200), 200)[0]
-    assert tau == pytest.approx(200, abs=10)
-
-
-def test_a_big_pulse_distorts_the_apparent_decay_time(toy):
-    r = toy.simulate(**settings(toy, T_hot=7.0))
-    tau = toy.decay_fit(r['t'], r['s21'].real, 2 * toy.time_of_peak(50, 200), 200)[0]
-    assert tau > 250  # not the 200 ns that went in
+def test_the_macro_has_no_fit_any_more(toy):
+    assert not hasattr(toy, 'decay_fit') and not hasattr(toy, 'curve_fit')
 
 
 # --- the comparison ---------------------------------------------------------------------
 
 def test_compare_overlays_one_curve_per_value_and_prints_a_table(toy, capsys):
-    values = [5.6, 6.0, 6.5]
-    fig = toy.compare('T_hot', values)
+    values = [0.1, 0.5, 1.0]
+    fig = toy.compare('delta_T', values)
     assert len(fig.axes) == 6
     assert all(len(ax.lines) == 3 for ax in fig.axes[:5])  # one curve per value
     text = capsys.readouterr().out
-    assert 'T_hot' in text and 'tau(Re)' in text
-    assert text.count('max|dS21|') == 3
+    assert 'delta_T' in text and 'tau' not in text  # the table has the size of the response only
+    assert text.count('max|dS21|') == 3  # one line per value
+    assert 'size of the response' in text  # under a header
     sizes = fig.axes[5].lines[0].get_ydata()
     assert np.all(np.diff(sizes) > 0)  # a bigger pulse, a bigger response
+
+
+def test_comparing_the_base_temperature_keeps_the_pulse_size_fixed(toy, capsys):
+    values = [4.5, 5.5, 6.5]
+    fig = toy.compare('T_base', values)
+    assert fig.axes[0].get_legend_handles_labels()[1] == ['T_base = 4.5', 'T_base = 5.5', 'T_base = 6.5']
+    assert 'delta_T = 0.5 fixed' in fig._suptitle.get_text()  # and the title says so
+    assert 'comparison of T_base' in fig._suptitle.get_text()
+
+    rows = [line for line in capsys.readouterr().out.splitlines() if line.startswith('T_base = ')]
+    assert len(rows) == 3
+    for value, row in zip(values, rows):
+        t_hot = float(row.split('T_hot = ')[1].split(' K')[0])
+        assert t_hot - value == pytest.approx(0.5)  # delta_T is the same in every row, T_hot moves
+    f_readout = [float(row.split('f_readout = ')[1].split(' GHz')[0]) for row in rows]
+    assert f_readout == sorted(f_readout, reverse=True)  # each readout follows its resonance (it falls with T)
+
+
+def test_the_response_depends_on_the_base_temperature_for_the_same_pulse(toy):
+    results = [toy.simulate(**settings(toy, T_base=T_base)) for T_base in (4.5, 5.0, 5.5, 6.0, 6.5)]
+    depth = [r['Ql'][0] / r['Qc'][0] for r in results]
+    assert all(a > b for a, b in zip(depth, depth[1:]))  # the dip gets shallower as it gets warmer
+    rest = [r['s21'][0].real for r in results]
+    assert all(a < b for a, b in zip(rest, rest[1:]))  # so S21 at rest rises
+    sizes = [toy.peak_response(r) for r in results]
+    assert max(sizes) - min(sizes) > 0.1  # and the response is not the same
 
 
 def test_compare_shows_frequencies_in_ghz(toy, capsys):
     fig = toy.compare('f_readout', [5.377e9, 5.380e9])
     assert 'f_readout = 5.377 GHz' in fig.axes[0].get_legend_handles_labels()[1]
     assert '5.380 GHz' in capsys.readouterr().out
+    assert 'T_base = 5.5, delta_T = 0.5 fixed' in fig._suptitle.get_text()
 
 
 @pytest.mark.parametrize('name, values', [('phi', [-0.5, 0.5]), ('q_changes_with_T', [False, True]),
-                                          ('Ql', [500.0, 900.0]), ('cable_delay', [0.0, 5e-9])])
+                                          ('Ql', [500.0, 900.0]), ('cable_delay', [0.0, 5e-9]),
+                                          ('T_base', [5.0, 6.0]), ('delta_T', [0.2, 0.8])])
 def test_any_setting_can_be_compared(toy, name, values):
     assert len(toy.compare(name, values).axes) == 6
 
@@ -219,15 +241,25 @@ def test_the_script_runs_and_opens_its_figures(monkeypatch, shown):
     runpy.run_path(str(TOYMC), run_name='__main__')
     assert len(shown) == 1  # one plt.show() ...
     assert len(shown[0]) == 2 + 2  # ... with 2 basic figures and the 2 default comparisons
+    assert 'comparison of f_readout' in plt.figure(3)._suptitle.get_text()  # figure 3
+    assert 'comparison of T_base' in plt.figure(4)._suptitle.get_text()  # figure 4: not T_hot any more
 
 
 def test_the_two_optional_arguments_are_T_hot_and_T_base(monkeypatch):
     monkeypatch.setattr(sys, 'argv', ['01_kid_response_toymc.py', '6.5', '5.0'])
     runpy.run_path(str(TOYMC), run_name='__main__')
     temperature = plt.figure(2).axes[0].lines[0].get_ydata()  # figure 2: the time response
-    t_peak = np.log(50 / 200) / (1 / 200 - 1 / 50)
-    assert temperature[0] == pytest.approx(5.0)
-    assert temperature.max() == pytest.approx(5.0 + 1.5 * (np.exp(-t_peak / 200) - np.exp(-t_peak / 50)), abs=1e-3)
+    assert temperature[0] == pytest.approx(5.0)  # T_base = 5.0, so delta_T = 6.5 - 5.0 = 1.5
+    assert temperature.max() == pytest.approx(5.0 + 1.5 * (np.exp(-t_peak() / 200) - np.exp(-t_peak() / 50)), abs=1e-3)
+    assert 'delta_T = 1.5 K' in plt.figure(2).axes[1].get_title()
+
+
+def test_with_only_T_hot_the_base_temperature_stays_as_it_is(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['01_kid_response_toymc.py', '6.0'])
+    runpy.run_path(str(TOYMC), run_name='__main__')
+    temperature = plt.figure(2).axes[0].lines[0].get_ydata()
+    assert temperature[0] == pytest.approx(5.5)  # the default T_base
+    assert 'delta_T = 0.5 K' in plt.figure(2).axes[1].get_title()  # 6.0 - 5.5
 
 
 # =============================================================================================

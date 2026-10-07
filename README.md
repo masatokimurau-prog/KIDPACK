@@ -149,7 +149,7 @@ kidpack-iqplot scan.npz --no-show --save scan.png    # no window, only a PNG
 
 ## Examples for students
 
-`examples/` has short, stand-alone macros (one file each, only numpy / scipy /
+`examples/` has short, stand-alone macros (one file each, only numpy and
 matplotlib; no kidpack needed) to hand out; see `examples/README.md`.
 `01_kid_response_toymc.py` computes the response of a KID from the ideal S21 of a
 notch resonator and compares it for different parameters; `02_pulse_analysis.py`

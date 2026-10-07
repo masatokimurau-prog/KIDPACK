@@ -6,8 +6,9 @@
 
     python 01_kid_response_toymc.py              # 下の SETTINGS のまま実行
     python 01_kid_response_toymc.py 6.0 5.5      # パルスの温度 T_hot と定常温度 T_base を指定
+                                                 # (パルスの大きさは delta_T = T_hot - T_base になる)
 
-このファイル 1 つだけで動きます (numpy, scipy, matplotlib が必要)。
+このファイル 1 つだけで動きます (numpy と matplotlib が必要)。
 使い方: 下の 1. の値を書き換えて、もう一度実行してください。
 
 
@@ -20,23 +21,21 @@
 出てくる図
 ----------
 図 1  共振曲線と、S21 が IQ 平面で描く軌跡
-図 2  温度・共振周波数・S21 の時間変化 (減衰時間の当てはめつき)
+図 2  温度・共振周波数・S21 の時間変化
 図 3〜  COMPARISONS で指定したパラメータを変えて、応答を重ねて比較したもの
+        (標準では、図 3 = 読み出し周波数、図 4 = 定常温度 T_base)
 
 
 見どころ
 --------
 * 読み出し周波数が共振のどこにあるかで、応答の向きと大きさが変わる (図 1 と、f_readout の比較)。
-* パルスが大きいと、S21 の応答は温度に比例しない。減衰時間の当てはめ結果が、
-  入力の tau_decay (200 ns) と違ってくる (図 2 の tau と、T_hot の比較)。
-  当てはめが指数関数的な減衰にならないときは "not an exponential decay" と表示する。
+* 定常温度 T_base が違うと、同じ大きさのパルス (delta_T) でも、応答が違う
+  (図 4。共振の幅 fr/Ql や、共振の深さ Ql/Qc が、温度で変わるため)。
 """
 import sys
-import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.optimize import OptimizeWarning, curve_fit
 
 
 # =============================================================================
@@ -45,12 +44,13 @@ from scipy.optimize import OptimizeWarning, curve_fit
 SETTINGS = {
     # --- 温度パルス ---
     'T_base': 5.5,         # [K]  パルスが来る前 (と、十分たった後) の温度
-    'T_hot': 6.0,          # [K]  パルスの大きさを決める温度 (実際のピークはこれより低い)
+    'delta_T': 0.5,        # [K]  パルスの大きさ。T_hot = T_base + delta_T (実際のピークはこれより低い)
     'tau_rise': 50.0,      # [ns] 立ち上がりの時定数
     'tau_decay': 200.0,    # [ns] 減衰の時定数
 
     # --- 読み出し ---
-    'f_readout': 5.38e9,   # [Hz] 読み出し周波数 (T_base での共振周波数 5.3803 GHz の近く)
+    'f_readout': None,     # [Hz] 読み出し周波数。None なら、T_base での共振周波数に合わせる
+                           #      (T_base = 5.5 K なら 5.3803 GHz)。数値を入れると、その周波数に固定する
 
     # --- 共振器: S21 の式のパラメータ ---
     'Ql': None,            # 負荷 Q。None なら T_base での値 Ql_T(T_base) を使う
@@ -68,7 +68,8 @@ SETTINGS = {
 # 名前は SETTINGS のキーのどれでもよい。行を足したり消したりしてよい。
 COMPARISONS = [
     ('f_readout', [5.374e9, 5.377e9, 5.380e9, 5.383e9, 5.386e9]),  # 読み出し周波数
-    ('T_hot', [5.6, 5.8, 6.0, 6.5, 7.0]),                          # パルスの大きさ
+    ('T_base', [4.5, 5.0, 5.5, 6.0, 6.5]),   # 定常温度。delta_T は同じまま、T_hot = T_base + delta_T が動く
+    # ('delta_T', [0.1, 0.3, 0.5, 1.0, 1.5]),                       # パルスの大きさ
     # ('q_changes_with_T', [False, True]),                         # Q も動くと?
     # ('phi', [-0.5, 0.0, 0.5]),                                   # 共振曲線が非対称だと?
 ]
@@ -121,16 +122,21 @@ def Qi_from(Ql, Qc):
 # =============================================================================
 # 3. シミュレーション
 # =============================================================================
-def simulate(T_base, T_hot, tau_rise, tau_decay, f_readout, Ql, Qc, phi, a, alpha,
+def simulate(T_base, delta_T, tau_rise, tau_decay, f_readout, Ql, Qc, phi, a, alpha,
              cable_delay, q_changes_with_T):
     """温度パルスに対する S21 の時間変化を計算する。結果は dict で返す。"""
     t = np.arange(N_POINTS, dtype=float)  # 時間 [ns]
 
     # 温度パルス: t = 0 で T_base から始まり、少し上がって、T_base に戻る
-    T = T_base + (T_hot - T_base) * (np.exp(-t / tau_decay) - np.exp(-t / tau_rise))
+    T_hot = T_base + delta_T
+    T = T_base + delta_T * (np.exp(-t / tau_decay) - np.exp(-t / tau_rise))
     if T.max() >= T_CRITICAL:
-        raise ValueError(f'温度が転移温度 {T_CRITICAL} K に達します。T_hot を下げてください。')
+        raise ValueError(f'温度が転移温度 {T_CRITICAL} K に達します。T_base か delta_T を下げてください。')
     fr = fr_T(T)
+
+    # 読み出し周波数: 指定がなければ、定常状態 (T_base) の共振周波数に合わせる
+    if f_readout is None:
+        f_readout = float(fr_T(T_base))
 
     # Ql, Qc: 一定にするか、温度で変えるか
     if q_changes_with_T:
@@ -143,42 +149,11 @@ def simulate(T_base, T_hot, tau_rise, tau_decay, f_readout, Ql, Qc, phi, a, alph
     # 読み出し周波数での S21 (時間の配列)
     s21 = s21_notch(f_readout, fr, Ql_t, Qc_t, phi, a, alpha, cable_delay)
 
-    return {'settings': dict(T_base=T_base, T_hot=T_hot, tau_rise=tau_rise, tau_decay=tau_decay,
-                             f_readout=f_readout, Ql=Ql, Qc=Qc, phi=phi, a=a, alpha=alpha,
-                             cable_delay=cable_delay, q_changes_with_T=q_changes_with_T),
+    return {'settings': dict(T_base=T_base, delta_T=delta_T, T_hot=T_hot, tau_rise=tau_rise,
+                             tau_decay=tau_decay, f_readout=f_readout, Ql=Ql, Qc=Qc, phi=phi,
+                             a=a, alpha=alpha, cable_delay=cable_delay,
+                             q_changes_with_T=q_changes_with_T),
             't': t, 'T': T, 'fr': fr, 'Ql': Ql_t, 'Qc': Qc_t, 's21': s21}
-
-
-def time_of_peak(tau_rise, tau_decay):
-    """温度パルスが最大になる時間 [ns]。"""
-    return np.log(tau_rise / tau_decay) / (1 / tau_decay - 1 / tau_rise)
-
-
-def decay_fit(t, y, t_start, tau_guess):
-    """t > t_start の部分を  A exp(-t/tau) + C  で当てはめて、(tau, 当てはめ曲線) を返す。
-
-    y の大きさが極端に小さくても当てはめが安定するように、大きさをそろえてから当てはめる。
-    その範囲が指数関数的な減衰になっていなければ (tau が範囲の 10 倍より長い、など)、
-    tau の値に意味はないので、(nan, None) を返す。
-    """
-    def model(x, A, tau, C):
-        return A * np.exp(-x / tau) + C
-
-    use = t > t_start
-    x, base = t[use], y[-1]
-    scale = np.ptp(y[use])
-    if scale == 0:  # 変化がない
-        return np.nan, None
-    try:
-        with warnings.catch_warnings():  # 誤差 (共分散) は使わないので、その警告は出さない
-            warnings.simplefilter('ignore', OptimizeWarning)
-            (A, tau, C), _ = curve_fit(model, x, (y[use] - base) / scale,
-                                       p0=[(y[use][0] - base) / scale, tau_guess, 0.0])
-    except RuntimeError:  # 当てはめが収束しなかった
-        return np.nan, None
-    if not 0 < tau < 10 * (x[-1] - x[0]):
-        return np.nan, None
-    return tau, model(x, A, tau, C) * scale + base
 
 
 def peak_response(result):
@@ -232,7 +207,6 @@ def plot_resonance_and_trajectory(result):
 def plot_time_response(result):
     """図 2: 温度、共振周波数、Q、S21 (実部・虚部・絶対値・位相) の時間変化。"""
     s, t, s21 = result['settings'], result['t'], result['s21']
-    t_fit = 2 * time_of_peak(s['tau_rise'], s['tau_decay'])  # ピークから十分たった後を当てはめる
 
     fig, ax = plt.subplots(figsize=(9, 10), ncols=2, nrows=4, sharex=True)
     ax[0, 0].plot(t, result['T'])
@@ -244,15 +218,10 @@ def plot_time_response(result):
     ax[1, 0].set_ylabel('Q')
     ax[1, 1].plot(t, Qi_from(result['Ql'], result['Qc']), label='Qi')
     ax[1, 1].set_ylabel('Qi')
-
-    for axis, part, name in ((ax[2, 0], s21.real, 'Real'), (ax[2, 1], s21.imag, 'Imag')):
-        axis.plot(t, part, label=name)
-        tau, curve = decay_fit(t, part, t_fit, s['tau_decay'])
-        if curve is not None:
-            axis.plot(t[t > t_fit], curve, lw=1, label=f'fit: tau = {tau:.1f} ns')
-        else:
-            axis.plot([], [], ' ', label='fit: not an exponential decay')
-        axis.set_ylabel(f'S21 {name}')
+    ax[2, 0].plot(t, s21.real)
+    ax[2, 0].set_ylabel('S21 Real')
+    ax[2, 1].plot(t, s21.imag)
+    ax[2, 1].set_ylabel('S21 Imag')
     ax[3, 0].plot(t, np.abs(s21))
     ax[3, 0].set_ylabel('|S21|')
     ax[3, 1].plot(t, np.angle(s21))
@@ -265,7 +234,7 @@ def plot_time_response(result):
     ax[3, 0].set_xlabel('Time [ns]')
     ax[3, 1].set_xlabel('Time [ns]')
     ax[0, 0].set_title(f"f_readout = {s['f_readout'] / 1e9:.4f} GHz")
-    ax[0, 1].set_title(f"tau_decay (input) = {s['tau_decay']:.0f} ns")
+    ax[0, 1].set_title(f"T_base = {s['T_base']:g} K, delta_T = {s['delta_T']:g} K")
     fig.tight_layout()
     return fig
 
@@ -276,7 +245,11 @@ def format_value(name, value):
 
 
 def compare(name, values):
-    """SETTINGS のうち name だけを values の各値に変えて、応答を重ねて比較する。"""
+    """SETTINGS のうち name だけを values の各値に変えて、応答を重ねて比較する。
+
+    name = 'T_base' のときは delta_T が SETTINGS のまま変わらないので、定常温度だけを変えた
+    比較になる (T_hot = T_base + delta_T は、いっしょに動く)。
+    """
     results = [simulate(**{**SETTINGS, name: value}) for value in values]
     labels = [f'{name} = {format_value(name, value)}' for value in values]
 
@@ -305,18 +278,18 @@ def compare(name, values):
     for axis in ax.flat:
         axis.grid(True)
     ax_re.legend(fontsize='small')
-    fig.suptitle(f'comparison of {name}')
+
+    # 比べていない (そのまま) の設定のうち、パルスに関わるものをタイトルに書く
+    fixed = [f'{key} = {SETTINGS[key]:g}' for key in ('T_base', 'delta_T') if key != name]
+    fig.suptitle(f'comparison of {name}' + (f'   ({", ".join(fixed)} fixed)' if fixed else ''))
     fig.tight_layout()
 
-    # 減衰時間の当てはめ結果を表にして表示する
-    t_fit = 2 * time_of_peak(SETTINGS['tau_rise'], SETTINGS['tau_decay'])
-    print(f'\n--- {name}: response and fitted decay time (input tau_decay = '
-          f"{SETTINGS['tau_decay']:.0f} ns) ---")
+    # 応答の大きさを表にして表示する
+    print(f'\n--- {name}: size of the response, max |S21(t) - S21(0)| ---')
     for value, result in zip(values, results):
-        tau_re = decay_fit(result['t'], result['s21'].real, t_fit, SETTINGS['tau_decay'])[0]
-        tau_im = decay_fit(result['t'], result['s21'].imag, t_fit, SETTINGS['tau_decay'])[0]
-        print(f'{name} = {format_value(name, value):<10} max|dS21| = {peak_response(result):.3f}   '
-              f'tau(Re) = {tau_re:6.1f} ns   tau(Im) = {tau_im:6.1f} ns')
+        s = result['settings']
+        print(f'{name} = {format_value(name, value):<10} T_hot = {s["T_hot"]:.2f} K   '
+              f'f_readout = {s["f_readout"] / 1e9:.4f} GHz   max|dS21| = {peak_response(result):.3f}')
     return fig
 
 
@@ -324,12 +297,12 @@ def compare(name, values):
 # 5. 実行
 # =============================================================================
 def main():
-    settings = dict(SETTINGS)
+    # 引数があれば、T_hot と T_base を指定する (パルスの大きさは delta_T = T_hot - T_base)
     if len(sys.argv) > 1:
-        settings['T_hot'] = float(sys.argv[1])
-    if len(sys.argv) > 2:
-        settings['T_base'] = float(sys.argv[2])
-    SETTINGS.update(settings)  # 比較 (compare) でも同じ値を使う
+        T_hot = float(sys.argv[1])
+        if len(sys.argv) > 2:
+            SETTINGS['T_base'] = float(sys.argv[2])
+        SETTINGS['delta_T'] = T_hot - SETTINGS['T_base']  # 比較 (compare) でも同じ値を使う
 
     result = simulate(**SETTINGS)
     plot_resonance_and_trajectory(result)
