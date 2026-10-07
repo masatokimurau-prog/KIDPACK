@@ -19,7 +19,7 @@ Acquire KID waveforms with an NI-SCOPE digitizer (exit code: 0 completed, 130 st
 
 | Option | Allowed values | Default | Meaning |
 |---|---|---|---|
-| `--run-number` | integer, 0 or more | required | run number XX (output goes to run_XX/); refuses to reuse an existing one |
+| `--run-number` `N\|test` | integer, 0 or more; or the word `test` (see Rules) | - | run number XX: output goes to run_XX/ and an existing run is never reused. Default: the next free number. "test": output goes to run_test/, replacing the previous test run |
 | `--events-per-file` | integer, 1 or more | required | events (waveforms) per output file |
 | `--num-files` | integer, 1 or more | required | number of files to acquire; Ctrl-C stops earlier and keeps the data so far |
 | `--condition` | text (tabs and line breaks become spaces) | (empty) | free-text measurement condition (temperature, bias, ...), recorded in the run summary and the YAML |
@@ -72,11 +72,12 @@ Acquire KID waveforms with an NI-SCOPE digitizer (exit code: 0 completed, 130 st
 
 ### Rules
 
+- `--run-number` is optional: without it the next free number is used (the highest of the `run_NN` directories and of the run summary, plus 1; 1 if there is none).
+- A run number that already has a directory is refused. The exception is `--run-number test`: it writes to `run_test/` and replaces the previous test run (its files are deleted once the instruments are ready), unless that directory holds files that are not DAQ output (then nothing is deleted). Test runs never count as numbers; the summary gets one line per test run.
 - `--time-window` and `--npts` cannot be given together.
 - `--sg-frequency` and `--sg-power` must be given together; `--sg-resource` needs both.
 - `--random-trigger-interval` needs `--random-trigger`.
 - `--random-trigger` cannot be combined with `--trigger-source`, `--trigger-level`, `--trigger-slope` or `--trigger-coupling` set to something else than their default.
-- The run directory `run_XX/` must not exist yet (a run number is never reused).
 
 ## kidpack-monitor
 

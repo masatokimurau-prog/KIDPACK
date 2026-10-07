@@ -31,7 +31,7 @@ def test_defaults_are_the_original_kid_py_values_except_the_trigger_coupling():
     assert cfg.backend == 'niscope'
 
 
-@pytest.mark.parametrize('missing', ['--run-number', '--events-per-file', '--num-files'])
+@pytest.mark.parametrize('missing', ['--events-per-file', '--num-files'])
 def test_required_arguments(missing):
     args = list(REQUIRED)
     i = args.index(missing)
@@ -144,3 +144,60 @@ def test_the_trigger_coupling_can_still_be_set_to_every_value_and_defaults_to_dc
     assert parse().trigger.coupling == 'dc'
     for value in ('lf_reject', 'hf_reject', 'dc', 'ac', 'ac_plus_hf_reject'):
         assert parse('--trigger-coupling', value).trigger.coupling == value
+
+
+# --- the run number: automatic, or "test" --------------------------------------------------------
+
+def parse_without_run_number(tmp_path, *extra):
+    parser = build_parser()
+    args = ['--events-per-file', '10', '--num-files', '2', '--output-dir', str(tmp_path), *extra]
+    return config_from_args(parser.parse_args(args), parser)
+
+
+def test_without_a_run_number_the_next_free_one_is_used(tmp_path):
+    cfg = parse_without_run_number(tmp_path)
+    assert (cfg.run_number, cfg.run_number_auto) == (1, True)  # the first run is number 1
+    for n in (1, 2, 5):
+        (tmp_path / f'run_{n:02d}').mkdir()
+    assert parse_without_run_number(tmp_path).run_number == 6
+
+
+def test_a_given_run_number_is_not_automatic(tmp_path):
+    cfg = parse('--output-dir', str(tmp_path))  # REQUIRED contains --run-number 3
+    assert (cfg.run_number, cfg.run_number_auto) == (3, False)
+
+
+def test_the_automatic_number_also_looks_at_the_run_summary(tmp_path):
+    (tmp_path / 'run_summary.txt').write_text('run_number\tstart_time\n9\ta\ntest\tb\n')
+    assert parse_without_run_number(tmp_path).run_number == 10
+    other = tmp_path / 'elsewhere.txt'
+    other.write_text('run_number\tstart_time\n20\ta\n')
+    assert parse_without_run_number(tmp_path, '--summary-file', str(other)).run_number == 21
+
+
+def test_test_runs_do_not_count_as_numbers(tmp_path):
+    (tmp_path / 'run_test').mkdir()
+    (tmp_path / 'run_04').mkdir()
+    assert parse_without_run_number(tmp_path).run_number == 5
+
+
+def test_the_run_number_can_be_the_word_test(tmp_path):
+    cfg = parse('--run-number', 'test', '--output-dir', str(tmp_path))
+    assert (cfg.run_number, cfg.run_label, cfg.is_test_run, cfg.run_number_auto) == ('test', 'test', True, False)
+    assert parse('--run-number', '0').run_number == 0 and not parse('--run-number', '12').is_test_run
+    assert parse('--run-number', '7').run_label == '07'
+
+
+@pytest.mark.parametrize('bad', ['Test', 'TEST', 'foo', '-1', '1.5', '', '1e3'])
+def test_other_words_and_numbers_are_not_run_numbers(bad):
+    with pytest.raises(SystemExit):
+        parse('--run-number', bad)
+
+
+def test_the_configuration_validates_the_run_number():
+    from kidpack.daq.config import DaqConfig
+    DaqConfig(run_number='test', events_per_file=1, num_files=1).validate()
+    DaqConfig(run_number=0, events_per_file=1, num_files=1).validate()
+    for bad in (-1, 'Test', '7', None):
+        with pytest.raises(ValueError, match='run-number'):
+            DaqConfig(run_number=bad, events_per_file=1, num_files=1).validate()

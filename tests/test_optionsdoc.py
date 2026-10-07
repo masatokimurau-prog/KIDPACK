@@ -1,6 +1,8 @@
 """docs/OPTIONS.md must say what the commands really accept."""
 from pathlib import Path
 
+import re
+
 import pytest
 
 from kidpack import optionsdoc
@@ -13,7 +15,7 @@ from kidpack.optionsdoc import ALLOWED, COMMANDS, RULES, command_options, render
 DOC = Path(__file__).resolve().parents[1] / 'docs' / 'OPTIONS.md'
 
 BASE = {
-    'kidpack-daq': ['--run-number', '1', '--events-per-file', '1', '--num-files', '1'],
+    'kidpack-daq': ['--events-per-file', '1', '--num-files', '1'],
     'kidpack-iqscan': ['--f-start', '5e9', '--f-stop', '6e9', '--num-points', '3'],
     'kidpack-monitor': [],
     'kidpack-iqplot': [],
@@ -33,8 +35,8 @@ def accepted(tmp_path):
         argv = list(argv)
         try:
             if command == 'kidpack-daq':
-                parser = daq_parser()
-                daq_config(parser.parse_args(BASE[command] + argv), parser)
+                parser = daq_parser()  # (an empty output directory: the run number is taken from it)
+                daq_config(parser.parse_args(BASE[command] + ['--output-dir', nowhere] + argv), parser)
             elif command == 'kidpack-iqscan':
                 parser = iqscan_parser()
                 iqscan_config(parser.parse_args(BASE[command] + argv), parser)
@@ -53,6 +55,17 @@ def section_of(text, name):
     """The part of the document that describes one command."""
     section = text[text.index(f'## {name}\n'):]
     return section[:section.index('\n## ')] if '\n## ' in section else section
+
+
+def test_every_table_row_has_exactly_four_cells():
+    """A stray | (e.g. in a metavar like N|test) would split a cell and shift the columns."""
+    text = DOC.read_text(encoding='utf-8')
+    # the rows of the option tables (the overview table at the top has two columns by design)
+    rows = [line for line in text.splitlines() if line.startswith('| `')]
+    assert len(rows) > 50
+    assert any(r'N\|test' in row for row in rows)  # the case this test is about
+    for row in rows:
+        assert len(re.split(r'(?<!\\)\|', row)) == 6, row  # '' | 4 cells | ''
 
 
 def test_the_committed_document_is_what_the_parsers_generate():
@@ -108,7 +121,7 @@ def numbers(option, bad, ok):
 
 VALUES = {
     # kidpack-daq
-    ('kidpack-daq', '--run-number'): v('--run-number', ['-1', 'abc'], ['0', '12']),
+    ('kidpack-daq', '--run-number'): v('--run-number', ['-1', 'abc', 'Test', '1.5', ''], ['0', '12', 'test']),
     ('kidpack-daq', '--events-per-file'): v('--events-per-file', ['0', '-5', '1.5'], ['1', '1000']),
     ('kidpack-daq', '--num-files'): v('--num-files', ['0', '-1'], ['1', '50']),
     ('kidpack-daq', '--condition'): v('--condition', [], ['temp 5.5K; lna 1.9V', '']),
@@ -195,6 +208,7 @@ def test_every_choice_is_accepted_and_anything_else_is_rejected(accepted, comman
 
 RULE_CASES = [
     # (command, arguments that must be rejected, arguments that must be accepted)
+    ('kidpack-daq', [], [[], ['--run-number', 'test'], ['--run-number', '4']]),  # the run number is optional
     ('kidpack-daq', [['--time-window', '1e-6', '--npts', '100']], [['--time-window', '1e-6'], ['--npts', '100']]),
     ('kidpack-daq', [['--sg-frequency', '5e9'], ['--sg-power', '0'], ['--sg-resource', 'X'],
                      ['--sg-resource', 'X', '--sg-power', '0']],

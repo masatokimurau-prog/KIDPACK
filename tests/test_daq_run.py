@@ -267,3 +267,125 @@ def test_cli_reports_a_missing_driver_cleanly(tmp_path, capsys, monkeypatch):
     assert main(args) == 1
     assert 'could not set up the instruments' in capsys.readouterr().err
     assert not (tmp_path / 'run_03').exists()  # a failed start must not burn the run number
+
+
+# --- the run number: automatic, or "test" (replaced by the next test run) ------------------------
+
+def cli_no_number(tmp_path, *extra):
+    """Like cli_args, but without --run-number."""
+    return ['--backend', 'simulator', '--events-per-file', '4', '--num-files', '2', '--npts', '64',
+            '--output-dir', str(tmp_path), *extra]
+
+
+def summary_numbers(tmp_path):
+    lines = (tmp_path / 'run_summary.txt').read_text().splitlines()[1:]
+    return [line.split('\t')[0] for line in lines]
+
+
+def test_without_a_run_number_every_run_gets_the_next_number(tmp_path, capsys):
+    for expected in (1, 2, 3):
+        assert main(cli_no_number(tmp_path)) == 0
+        assert f'using the next free run number, {expected}' in capsys.readouterr().out
+        assert (tmp_path / f'run_{expected:02d}' / 'data' / f'run{expected:02d}-00.npz').exists()
+    assert summary_numbers(tmp_path) == ['1', '2', '3']
+
+
+def test_a_deleted_run_does_not_free_its_number(tmp_path):
+    for _ in range(3):
+        main(cli_no_number(tmp_path))
+    import shutil
+    shutil.rmtree(tmp_path / 'run_03')  # the last run is deleted, but the summary still lists it
+    main(cli_no_number(tmp_path))
+    assert (tmp_path / 'run_04').exists() and not (tmp_path / 'run_03').exists()
+    assert summary_numbers(tmp_path) == ['1', '2', '3', '4']
+
+
+def test_test_runs_do_not_disturb_the_numbering(tmp_path):
+    main(cli_no_number(tmp_path))
+    main(cli_args(tmp_path, run='test'))
+    main(cli_no_number(tmp_path))
+    assert sorted(p.name for p in tmp_path.iterdir() if p.is_dir()) == ['run_01', 'run_02', 'run_test']
+    assert summary_numbers(tmp_path) == ['1', 'test', '2']
+
+
+def test_a_test_run_is_named_test_everywhere(tmp_path):
+    assert main(cli_args(tmp_path, run='test')) == 0
+    run_dir = tmp_path / 'run_test'
+    assert sorted(p.name for p in (run_dir / 'data').iterdir()) == ['runtest-00.npz', 'runtest-01.npz']
+    assert sorted(p.name for p in (run_dir / 'config').iterdir()) == ['runtest-00.yaml', 'runtest-01.yaml']
+    arrays, meta = load(str(run_dir), 'runtest-01')
+    assert meta['run_number'] == 'test' and meta['file_number'] == 1 and arrays['ch0'].shape == (4, 64)
+    assert summary_numbers(tmp_path) == ['test']
+
+
+def test_a_new_test_run_replaces_the_previous_one_completely(tmp_path, capsys):
+    assert main(cli_args(tmp_path, run='test')) == 0  # 2 files of 4 events
+    (tmp_path / 'run_test' / 'data' / 'runtest-05.npz.tmp').write_bytes(b'left over from a crash')
+    args = ['--backend', 'simulator', '--run-number', 'test', '--events-per-file', '2', '--num-files', '1',
+            '--npts', '64', '--output-dir', str(tmp_path)]
+    assert main(args) == 0  # an existing "test" does not matter
+    assert 'the previous test run was replaced' in capsys.readouterr().err
+
+    run_dir = tmp_path / 'run_test'
+    assert [p.name for p in (run_dir / 'data').iterdir()] == ['runtest-00.npz']  # nothing of the old run left
+    assert [p.name for p in (run_dir / 'config').iterdir()] == ['runtest-00.yaml']
+    arrays, meta = load(str(run_dir), 'runtest-00')
+    assert arrays['ch0'].shape == (2, 64) and meta['nevents'] == 2  # the new data
+    assert summary_numbers(tmp_path) == ['test', 'test']  # the summary keeps one line per run
+
+
+def test_only_the_test_run_is_replaced_a_numbered_run_never_is(tmp_path, capsys):
+    assert main(cli_args(tmp_path, run='5')) == 0
+    before = (tmp_path / 'run_05' / 'data' / 'run05-00.npz').read_bytes()
+    assert main(cli_args(tmp_path, run='5')) == 1
+    assert 'already exists' in capsys.readouterr().err
+    assert (tmp_path / 'run_05' / 'data' / 'run05-00.npz').read_bytes() == before
+    assert main(cli_args(tmp_path, run='test')) == 0 and main(cli_args(tmp_path, run='test')) == 0
+
+
+def test_files_that_are_not_daq_output_are_never_deleted_with_a_test_run(tmp_path, capsys):
+    assert main(cli_args(tmp_path, run='test')) == 0
+    run_dir = tmp_path / 'run_test'
+    (run_dir / 'notes.txt').write_text('my notes')
+    (run_dir / 'data' / 'important.csv').write_text('x')
+    before = sorted(str(p.relative_to(tmp_path)) for p in run_dir.rglob('*'))
+
+    assert main(cli_args(tmp_path, run='test')) == 1
+    error = capsys.readouterr().err
+    assert 'not DAQ output' in error and 'notes.txt' in error and 'important.csv' in error
+    assert sorted(str(p.relative_to(tmp_path)) for p in run_dir.rglob('*')) == before  # nothing was touched
+
+
+def test_a_directory_named_like_a_data_file_is_not_deleted_either(tmp_path):
+    assert main(cli_args(tmp_path, run='test')) == 0
+    (tmp_path / 'run_test' / 'data' / 'sneaky.npz').mkdir()
+    assert main(cli_args(tmp_path, run='test')) == 1
+    assert (tmp_path / 'run_test' / 'data' / 'sneaky.npz').is_dir()
+
+
+def test_a_failed_setup_does_not_destroy_the_previous_test_run(tmp_path, monkeypatch, capsys):
+    assert main(cli_args(tmp_path, run='test')) == 0
+    before = {p.name: p.read_bytes() for p in (tmp_path / 'run_test' / 'data').iterdir()}
+    monkeypatch.setitem(__import__('sys').modules, 'niscope', None)  # the digitizer driver is missing
+    args = cli_args(tmp_path, run='test')
+    args[args.index('--backend') + 1] = 'niscope'
+    assert main(args) == 1
+    assert 'could not set up the instruments' in capsys.readouterr().err
+    assert {p.name: p.read_bytes() for p in (tmp_path / 'run_test' / 'data').iterdir()} == before
+
+
+def test_an_old_logs_directory_of_a_previous_test_run_is_cleaned_too(tmp_path):
+    assert main(cli_args(tmp_path, run='test')) == 0
+    (tmp_path / 'run_test' / 'logs').mkdir()
+    (tmp_path / 'run_test' / 'logs' / 'daq.log').write_text('from an older version')
+    assert main(cli_args(tmp_path, run='test')) == 0
+    assert not (tmp_path / 'run_test' / 'logs').exists()
+
+
+def test_run_daq_itself_replaces_a_test_run(tmp_path):
+    cfg = make_cfg(tmp_path, run_number='test', num_files=2)
+    first = run_daq(cfg, SimulatedScope(cfg, seed=1))
+    assert first.status == 'completed' and first.run_dir.endswith('run_test')
+    cfg2 = make_cfg(tmp_path, run_number='test', num_files=1)
+    assert run_daq(cfg2, SimulatedScope(cfg2, seed=2)).status == 'completed'
+    assert os.listdir(tmp_path / 'run_test' / 'data') == ['runtest-00.npz']

@@ -23,12 +23,20 @@ coupling, which is `dc` (it was `LF_REJECT`).
 ```bash
 pip install -e ".[daq]"     # on the DAQ PC (adds only the niscope binding; see below)
 
-kidpack-daq --run-number 12 --events-per-file 1000 --num-files 5 \
+kidpack-daq --events-per-file 1000 --num-files 5 \
     --condition "temp 5.5K (pid); lna 1.9V 13.7mA; sg 5.490GHz -12dBm"
+kidpack-daq --run-number 12 --events-per-file 1000 --num-files 5   # a number of your own
+kidpack-daq --run-number test --events-per-file 100 --num-files 1  # a scratch run, replaced next time
 ```
 
-- `--run-number`, `--events-per-file` and `--num-files` are required. Ctrl-C
-  stops early and keeps the data acquired so far (exit code 130).
+- `--events-per-file` and `--num-files` are required. Ctrl-C stops early and
+  keeps the data acquired so far (exit code 130).
+- Run number: without `--run-number` the next free number is used (one more than
+  the highest `run_NN` directory or run-summary entry; 1 for the first run). An
+  existing number is refused. `--run-number test` is the exception: it writes
+  to `run_test/` and replaces the previous test run (only DAQ output is ever
+  deleted, and only after the instruments are ready); test runs do not count
+  as numbers, and the summary keeps one line per test run.
 - Output: `run_XX/{data/runXX-YY.npz, config/runXX-YY.yaml}` under
   `--output-dir` (default `KIDPACK/data/`, git-ignored, wherever the command is
   run from; `./data` if not run from a source checkout). No log file is

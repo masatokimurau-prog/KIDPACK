@@ -31,7 +31,7 @@ COMMANDS = [
 _COUPLING_NOTE = 'see choices'
 ALLOWED = {
     # ---- kidpack-daq ----
-    ('kidpack-daq', '--run-number'): 'integer, 0 or more',
+    ('kidpack-daq', '--run-number'): 'integer, 0 or more; or the word `test` (see Rules)',
     ('kidpack-daq', '--events-per-file'): 'integer, 1 or more',
     ('kidpack-daq', '--num-files'): 'integer, 1 or more',
     ('kidpack-daq', '--condition'): 'text (tabs and line breaks become spaces)',
@@ -94,12 +94,17 @@ ALLOWED = {
 # Rules between options (checked by the tests).
 RULES = {
     'kidpack-daq': [
+        '`--run-number` is optional: without it the next free number is used (the highest of the '
+        '`run_NN` directories and of the run summary, plus 1; 1 if there is none).',
+        'A run number that already has a directory is refused. The exception is `--run-number test`: '
+        'it writes to `run_test/` and replaces the previous test run (its files are deleted once the '
+        'instruments are ready), unless that directory holds files that are not DAQ output (then '
+        'nothing is deleted). Test runs never count as numbers; the summary gets one line per test run.',
         '`--time-window` and `--npts` cannot be given together.',
         '`--sg-frequency` and `--sg-power` must be given together; `--sg-resource` needs both.',
         '`--random-trigger-interval` needs `--random-trigger`.',
         '`--random-trigger` cannot be combined with `--trigger-source`, `--trigger-level`, '
         '`--trigger-slope` or `--trigger-coupling` set to something else than their default.',
-        'The run directory `run_XX/` must not exist yet (a run number is never reused).',
     ],
     'kidpack-monitor': [
         'Without `file`, the newest `run*-*.npz` under `--data-dir` is used.',
@@ -173,7 +178,8 @@ def _value_text(command, action):
 
 def _name_text(action):
     if action.option_strings:
-        return f"`{action.option_strings[0]}`" + (f' `{action.metavar}`' if action.metavar else '')
+        metavar = f' `{action.metavar}`'.replace('|', '\\|') if action.metavar else ''  # | would split the table cell
+        return f"`{action.option_strings[0]}`" + metavar
     return f'`{action.metavar or action.dest}` (positional)'
 
 

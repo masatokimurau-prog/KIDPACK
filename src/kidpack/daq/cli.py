@@ -13,6 +13,8 @@ def main(argv=None):
     cfg = config_from_args(args, parser)
     command_line = sys.argv if argv is None else ['kidpack-daq', *argv]
 
+    if cfg.run_number_auto:
+        print(f'--run-number not given: using the next free run number, {cfg.run_number}')
     writer = RunWriter(cfg, command_line=command_line)
     try:
         writer.check_new()  # before any device is opened

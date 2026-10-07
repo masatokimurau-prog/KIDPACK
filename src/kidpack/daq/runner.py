@@ -8,6 +8,7 @@ from typing import Optional
 
 from kidpack.daq.summary import append_run_summary
 from kidpack.daq.writer import RunWriter
+from kidpack.runs import file_stem
 
 log = logging.getLogger('kidpack.daq')
 
@@ -86,8 +87,10 @@ class _Run:
         run_stop_ns = None
 
         with log_to_console():
-            log.info('run %02d start: %d file(s) x %d events -> %s',
-                     cfg.run_number, cfg.num_files, cfg.events_per_file, self.writer.run_dir)
+            log.info('run %s start: %d file(s) x %d events -> %s',
+                     cfg.run_label, cfg.num_files, cfg.events_per_file, self.writer.run_dir)
+            if self.writer.replaced_test_run:
+                log.info('the previous test run was replaced')
             log.info('condition: %s', cfg.condition or '(none)')
             log.info('config: %s', json.dumps(cfg.to_dict()))
             try:
@@ -121,8 +124,8 @@ class _Run:
             except OSError:
                 log.exception('could not update the run summary %s', cfg.summary_path)
 
-            log.info('run %02d %s: %d events in %d file(s), DAQ rate %s',
-                     cfg.run_number, status, self.total_events, self.files_written,
+            log.info('run %s %s: %d events in %d file(s), DAQ rate %s',
+                     cfg.run_label, status, self.total_events, self.files_written,
                      'n/a' if rate is None else f'{rate:.2f} Hz')
 
         return RunResult(status, self.writer.run_dir, run_start_ns, run_stop_ns,
@@ -164,8 +167,8 @@ class _Run:
         try:
             self._flush(status, [error] if error else [])
         except Exception:
-            log.exception('failed to write the partial file run%02d-%02d',
-                          self.cfg.run_number, self.file_number)
+            log.exception('failed to write the partial file %s',
+                          file_stem(self.cfg.run_number, self.file_number))
 
     def _stop_sg(self):
         if self.sg is None:

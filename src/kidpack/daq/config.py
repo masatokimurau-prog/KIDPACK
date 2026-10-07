@@ -10,7 +10,10 @@ import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
+
+from kidpack.runs import (RUN_TEST, is_valid_run_number, next_run_number, run_label,
+                          run_number_arg)
 
 VERTICAL_COUPLINGS = ('dc', 'ac', 'gnd')
 TRIGGER_COUPLINGS = ('lf_reject', 'hf_reject', 'dc', 'ac', 'ac_plus_hf_reject')
@@ -65,12 +68,13 @@ class SgConfig:
 @dataclass
 class DaqConfig:
     # run control
-    run_number: int
+    run_number: Union[int, str]  # an integer, or "test" (replaces the previous test run)
     events_per_file: int
     num_files: int
     output_dir: str = field(default_factory=default_output_dir)
     summary_file: Optional[str] = None
     condition: str = ''
+    run_number_auto: bool = False  # True if --run-number was not given and the next free number was taken
     backend: str = 'niscope'
     # digitizer
     resource: str = 'PXI2Slot2'
@@ -90,6 +94,14 @@ class DaqConfig:
     def summary_path(self):
         return self.summary_file or os.path.join(self.output_dir, SUMMARY_FILE_NAME)
 
+    @property
+    def run_label(self):
+        return run_label(self.run_number)
+
+    @property
+    def is_test_run(self):
+        return self.run_number == RUN_TEST
+
     def to_dict(self):
         return asdict(self)
 
@@ -99,7 +111,7 @@ class DaqConfig:
             if not ok:
                 raise ValueError(message)
 
-        need(self.run_number >= 0, '--run-number must be >= 0')
+        need(is_valid_run_number(self.run_number), "--run-number must be an integer (0 or more) or 'test'")
         need(self.events_per_file >= 1, '--events-per-file must be >= 1')
         need(self.num_files >= 1, '--num-files must be >= 1')
         need(self.backend in BACKENDS, f'--backend must be one of {BACKENDS}')
@@ -154,8 +166,10 @@ def build_parser():
                     '(exit code: 0 completed, 130 stopped with Ctrl-C, 1 error).')
 
     g = p.add_argument_group('run control')
-    g.add_argument('--run-number', type=int, required=True,
-                   help='run number XX (output goes to run_XX/); refuses to reuse an existing one')
+    g.add_argument('--run-number', type=run_number_arg, default=None, metavar='N|test',
+                   help='run number XX: output goes to run_XX/ and an existing run is never reused. '
+                        'Default: the next free number. "test": output goes to run_test/, '
+                        'replacing the previous test run')
     g.add_argument('--events-per-file', type=int, required=True,
                    help='events (waveforms) per output file')
     g.add_argument('--num-files', type=int, required=True,
@@ -264,8 +278,15 @@ def config_from_args(args, parser=None):
     elif args.sg_resource is not None:
         parser.error('--sg-resource requires --sg-frequency and --sg-power')
 
+    run_number_auto = args.run_number is None
+    run_number = args.run_number
+    if run_number_auto:  # not given: the next free number (after the run directories and the summary)
+        summary = args.summary_file or os.path.join(args.output_dir, SUMMARY_FILE_NAME)
+        run_number = next_run_number(args.output_dir, summary)
+
     cfg = DaqConfig(
-        run_number=args.run_number,
+        run_number=run_number,
+        run_number_auto=run_number_auto,
         events_per_file=args.events_per_file,
         num_files=args.num_files,
         output_dir=args.output_dir,

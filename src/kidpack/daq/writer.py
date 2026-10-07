@@ -7,6 +7,7 @@
 No log file is written; progress and errors go to the console (errors are
 also recorded in the YAML of the affected file).
 """
+import fnmatch
 import os
 
 import numpy as np
@@ -14,6 +15,12 @@ import yaml
 
 from kidpack.daq.timeutil import iso_utc
 from kidpack.daq.version import software_version
+from kidpack.runs import file_stem, run_dir_name
+
+
+# What a run directory of this DAQ contains: subdirectory -> names of its files.
+_DAQ_OUTPUT = {'data': ('*.npz', '*.npz.tmp'), 'config': ('*.yaml', '*.yaml.tmp'),
+               'logs': ('*.log',)}  # (older versions also wrote logs/daq.log)
 
 
 class RunWriter:
@@ -24,23 +31,65 @@ class RunWriter:
         self.run_start_ns = None  # set by the run control before the first write
         self.sg_api = None  # how the signal generator is driven (set by the run control)
         self.sg_info = {}  # its model / driver revision if known (set by the run control)
-        self.run_dir = os.path.join(cfg.output_dir, f'run_{cfg.run_number:02d}')
+        self.replaced_test_run = False  # True if a previous 'test' run was removed by create()
+        self.run_dir = os.path.join(cfg.output_dir, run_dir_name(cfg.run_number))
         self.data_dir = os.path.join(self.run_dir, 'data')
         self.config_dir = os.path.join(self.run_dir, 'config')
         self._version = software_version()
 
     def check_new(self):
-        """Refuse to reuse a run number (raw data must never be overwritten)."""
-        if os.path.exists(self.run_dir):
+        """Refuse to reuse a run number (raw data must never be overwritten).
+
+        The run "test" is the exception: it replaces the previous test run, unless that
+        directory holds something that is not DAQ output (then nothing is deleted).
+        """
+        if not os.path.exists(self.run_dir):
+            return
+        if not self.cfg.is_test_run:
             raise FileExistsError(f'run directory already exists: {self.run_dir}')
+        foreign = self._not_daq_output()
+        if foreign:
+            raise FileExistsError(
+                f"the test run directory {self.run_dir} contains files that are not DAQ output, "
+                f"so it is not replaced; remove them by hand: {', '.join(foreign)}")
+
+    def _not_daq_output(self):
+        """Entries of the run directory that this DAQ would not have written."""
+        if not os.path.isdir(self.run_dir):
+            return [self.run_dir]
+        foreign = []
+        for entry in sorted(os.listdir(self.run_dir)):
+            path = os.path.join(self.run_dir, entry)
+            patterns = _DAQ_OUTPUT.get(entry)
+            if patterns is None or not os.path.isdir(path):
+                foreign.append(path)
+                continue
+            foreign += [os.path.join(path, name) for name in sorted(os.listdir(path))
+                        if not os.path.isfile(os.path.join(path, name))
+                        or not any(fnmatch.fnmatch(name, pattern) for pattern in patterns)]
+        return foreign
+
+    def _remove_old_test_run(self):
+        """Delete the files of a previous test run (check_new() has checked that they are ours)."""
+        for sub, patterns in _DAQ_OUTPUT.items():
+            directory = os.path.join(self.run_dir, sub)
+            if not os.path.isdir(directory):
+                continue
+            for name in os.listdir(directory):
+                os.remove(os.path.join(directory, name))
+            os.rmdir(directory)
+        os.rmdir(self.run_dir)
+        self.replaced_test_run = True
 
     def create(self):
         self.check_new()
+        if self.cfg.is_test_run and os.path.exists(self.run_dir):
+            self._remove_old_test_run()
         for directory in (self.data_dir, self.config_dir):
             os.makedirs(directory)
 
     def stem(self, file_number):
-        return f'run{self.cfg.run_number:02d}-{file_number:02d}'
+        return file_stem(self.cfg.run_number, file_number)
 
     def write_file(self, file_number, events, *, file_start_ns, file_stop_ns,
                    daq_rate_hz, status, actual, errors=()):
