@@ -100,16 +100,9 @@ class RunWriter:
         sample_rate = actual.get('sample_rate') or cfg.sample_rate
         ref_position = actual.get('ref_position') or cfg.ref_position
 
-        arrays = dict(
-            ch0=np.stack([e.ch0 for e in events]).astype(np.float32, copy=False),
-            ch1=np.stack([e.ch1 for e in events]).astype(np.float32, copy=False),
-            event_id=np.arange(n, dtype=np.uint32),
-            timestamp_unix_ns=np.array([e.timestamp_unix_ns for e in events], dtype=np.int64),
-            npts=np.int32(cfg.npts),
-            sample_rate=np.float64(sample_rate),
-            ref_position=np.float64(ref_position),
-            run_start_unix_ns=np.int64(self.run_start_ns),
-        )
+        arrays = raw_arrays(np.stack([e.ch0 for e in events]), np.stack([e.ch1 for e in events]),
+                            [e.timestamp_unix_ns for e in events], cfg.npts, sample_rate,
+                            ref_position, self.run_start_ns)
         stem = self.stem(file_number)
         npz_path = os.path.join(self.data_dir, f'{stem}.npz')
         atomic_write(npz_path, lambda f: np.savez(f, **arrays), 'wb')
@@ -154,6 +147,25 @@ class RunWriter:
                       lambda f: yaml.safe_dump(document, f, sort_keys=False, allow_unicode=True),
                       'w')
         return npz_path
+
+
+def raw_arrays(ch0, ch1, timestamp_unix_ns, npts, sample_rate, ref_position, run_start_ns):
+    """The arrays of a raw data file (the contract of the I/O format), with their dtypes.
+
+    ch0, ch1: (nevents, npts) volts; timestamp_unix_ns: one trigger time per event. The
+    event_id of the file counts from 0. Used by the DAQ and by the converter of old files.
+    """
+    ch0 = np.asarray(ch0).astype(np.float32, copy=False)
+    return dict(
+        ch0=ch0,
+        ch1=np.asarray(ch1).astype(np.float32, copy=False),
+        event_id=np.arange(len(ch0), dtype=np.uint32),
+        timestamp_unix_ns=np.asarray(timestamp_unix_ns, dtype=np.int64),
+        npts=np.int32(npts),
+        sample_rate=np.float64(sample_rate),
+        ref_position=np.float64(ref_position),
+        run_start_unix_ns=np.int64(run_start_ns),
+    )
 
 
 def _trigger(t):
