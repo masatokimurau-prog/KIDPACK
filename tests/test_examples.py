@@ -10,9 +10,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
+from kidpack.daq.backends.simulator import SimulatedScope
+from kidpack.daq.config import DaqConfig
+from kidpack.daq.runner import run_daq
+from kidpack.iqscan.plot import plot_scan
+from kidpack.iqscan.reader import load_iqscan
+from kidpack.monitor.pulses import make_pulse_view, plot_iq_plane, plot_waveforms, select_events
+from kidpack.rawdata import load_raw
+
 EXAMPLES = Path(__file__).resolve().parents[1] / 'examples'
 TOYMC = EXAMPLES / '01_kid_response_toymc.py'
 ANALYSIS = EXAMPLES / '02_pulse_analysis.py'
+WAVEFORMS = EXAMPLES / '03_plot_waveforms.py'
+IQSCAN = EXAMPLES / '04_plot_iqscan.py'
 
 
 @pytest.fixture(scope='module')
@@ -559,3 +569,309 @@ def test_the_analysis_in_a_real_jupyter_kernel(tmp_path):
         figures = [o for o in notebook.cells[number].outputs if o.output_type == 'display_data' and 'image/png' in o.data]
         assert len(figures) == 1
     assert (tmp_path / 'pulses_ana.csv').is_file()
+
+
+# =============================================================================================
+# 03_plot_waveforms.py and 04_plot_iqscan.py: the figures of kidpack-monitor and kidpack-iqplot
+# =============================================================================================
+
+def edited(tmp_path, macro, **changes):
+    """The macro with some settings edited, as a student does: {'FILENAME = None': "FILENAME = 'x.npz'"}."""
+    source = macro.read_text(encoding='utf-8')
+    for old, new in changes.items():
+        assert source.count(old) == 1, old  # the line to edit is there, once
+        source = source.replace(old, new)
+    path = tmp_path / f'edited_{macro.name}'
+    path.write_text(source, encoding='utf-8')
+    return path
+
+
+def filename_setting(path):
+    """The edit that writes the file name after FILENAME = (at the start of a line: REF_FILENAME is another line)."""
+    return {'\nFILENAME = None': f'\nFILENAME = {str(path)!r}'}
+
+
+def run_macro(monkeypatch, macro, *argv):
+    monkeypatch.setattr(sys, 'argv', [macro.name, *map(str, argv)])
+    return runpy.run_path(str(macro), run_name='__main__')
+
+
+def daq_file(tmp_path, events=40, npts=2000):
+    """A raw file written by the DAQ (simulator): has event_id, noise and a pulse in every event."""
+    cfg = DaqConfig(run_number=1, events_per_file=events, num_files=1, output_dir=str(tmp_path / 'daq'),
+                    npts=npts)
+    run_daq(cfg, SimulatedScope(cfg, seed=3))
+    return tmp_path / 'daq' / 'run_01' / 'data' / 'run01-00.npz'
+
+
+def waveform_file(tmp_path, name='pulses.npz'):
+    write_pulses(tmp_path / name, nwf=20)  # no event_id: like a file of the old DAQ macro
+    return tmp_path / name
+
+
+F_SCAN = np.linspace(5.324e9, 5.328e9, 41)
+
+
+def scan_file(tmp_path, name='scan.npz', dip=True, delay=50e-9, power=None, gain=0.01):
+    """A notch resonator times a cable delay and a gain, stored like kidpack-iqscan / the old iq_scan.py."""
+    x = 2 * (F_SCAN - 5.326e9) / 0.4e6
+    true = (1 - (0.6 / (1 + 1j * x) if dip else 0)) * np.exp(-2j * np.pi * F_SCAN * delay)
+    iq = gain * true
+    extra = {} if power is None else {'power_dbm': power}
+    np.savez(tmp_path / name, dd=np.column_stack([F_SCAN, iq.real, iq.imag]), **extra)
+    return tmp_path / name
+
+
+def same_lines(a, b, rtol=1e-5, atol=1e-6):
+    assert len(a.lines) == len(b.lines)
+    for la, lb in zip(a.lines, b.lines):
+        np.testing.assert_allclose(la.get_xdata(), lb.get_xdata(), rtol=rtol, atol=atol)
+        np.testing.assert_allclose(la.get_ydata(), lb.get_ydata(), rtol=rtol, atol=atol)
+        assert la.get_label() == lb.get_label() and la.get_marker() == lb.get_marker()
+
+
+# --- 03: the same figures as kidpack-monitor ------------------------------------------------------
+
+def monitor_figures(path, stride=1):
+    raw = load_raw(path)
+    view = make_pulse_view(raw, select_events(raw.nevents, stride), rebin_factor=5)
+    return plot_iq_plane(view), plot_waveforms(view)
+
+
+@pytest.mark.parametrize('stride', [1, 2])
+def test_03_draws_what_kidpack_monitor_draws(monkeypatch, tmp_path, stride):
+    path = daq_file(tmp_path)
+    changes = {} if stride == 1 else {'STRIDE = 1 ': f'STRIDE = {stride} '}
+    ns = run_macro(monkeypatch, edited(tmp_path, WAVEFORMS, **changes), path)
+    pc1, pc2 = monitor_figures(path, stride)
+
+    assert ns['ax1'].shape == ns['ax2'].shape == (4, 4)
+    for k in range(16):
+        mine1, mine2, ref1, ref2 = ns['ax1'].flat[k], ns['ax2'].flat[k], pc1.axes[k], pc2.axes[k]
+        assert mine1.get_title() == ref1.get_title() == mine2.get_title() == ref2.get_title()
+        for mine, ref in ((mine1, ref1), (mine2, ref2)):
+            assert (mine.get_xlabel(), mine.get_ylabel()) == (ref.get_xlabel(), ref.get_ylabel())
+        same_lines(mine1, ref1)  # pedestal and peak
+        same_lines(mine2, ref2)  # I, Q, Proj and the two stars
+        np.testing.assert_allclose(mine1.collections[0].get_offsets(), ref1.collections[0].get_offsets(),
+                                   rtol=1e-5, atol=1e-4)  # the points of the IQ plane (mV)
+        np.testing.assert_allclose(mine1.collections[0].get_array(), ref1.collections[0].get_array(), rtol=1e-5)
+    assert [a.get_title() for a in ns['ax1'].flat][:3] == [f'Event #{stride * i}' for i in range(3)]
+
+
+def test_03_the_red_star_of_the_iq_plane_is_the_star_of_the_waveforms(monkeypatch, tmp_path):
+    ns = run_macro(monkeypatch, WAVEFORMS, daq_file(tmp_path))
+    for k in range(16):
+        star_iq = ns['ax1'].flat[k].lines[1]  # (I, Q) of the peak
+        star_i, star_q = ns['ax2'].flat[k].lines[3], ns['ax2'].flat[k].lines[4]
+        assert star_iq.get_xdata()[0] == pytest.approx(star_i.get_ydata()[0])
+        assert star_iq.get_ydata()[0] == pytest.approx(star_q.get_ydata()[0])
+        assert star_i.get_xdata()[0] == star_q.get_xdata()[0]  # at the same time
+        proj = ns['ax2'].flat[k].lines[2].get_ydata()
+        assert proj.max() == pytest.approx(np.max(np.abs(ns['vc'][k])) * 1e3, rel=1e-5)  # proj max, in mV
+
+
+def test_03_known_pulses_give_known_waveforms(monkeypatch, tmp_path):
+    truth = write_pulses(tmp_path / 'pulses.npz', nwf=16)
+    ns = run_macro(monkeypatch, WAVEFORMS, tmp_path / 'pulses.npz')
+    for k in (0, 7, 15):
+        np.testing.assert_allclose(ns['ped0'][k], truth['ped_i'][k], atol=1e-6)
+        np.testing.assert_allclose(ns['ped1'][k], truth['ped_q'][k], atol=1e-6)
+        peak_phase = np.angle(ns['vc'][k, ns['peak_bin'][k]])
+        assert np.exp(1j * peak_phase) == pytest.approx(np.exp(1j * truth['theta'][k]), abs=1e-3)
+        assert ns['proj'][k].min() > -1e-4  # the pulse is all in the direction of the peak: no negative part
+    assert [a.get_title() for a in ns['ax1'].flat] == [f'Event #{i}' for i in range(16)]  # no event_id: 0, 1, ...
+
+
+def test_03_fewer_than_16_events_leave_the_other_panels_blank(monkeypatch, tmp_path):
+    path = daq_file(tmp_path, events=5)
+    ns = run_macro(monkeypatch, WAVEFORMS, path)
+    pc1, pc2 = monitor_figures(path)
+    for k in range(16):
+        assert ns['ax1'].flat[k].axison == ns['ax2'].flat[k].axison == (k < 5)
+        assert (ns['ax2'].flat[k].get_xlabel(), ns['ax2'].flat[k].get_ylabel()) == (
+            pc2.axes[k].get_xlabel(), pc2.axes[k].get_ylabel())  # the x label is on the last panel of a column
+    assert ns['nplot'] == 5
+
+
+def test_03_saves_the_figures_only_if_asked(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    run_macro(monkeypatch, WAVEFORMS, waveform_file(tmp_path))
+    assert not (tmp_path / 'pc1.png').exists() and not (tmp_path / 'pc2.png').exists()
+    run_macro(monkeypatch, edited(tmp_path, WAVEFORMS, **{'SAVE = False': 'SAVE = True'}), tmp_path / 'pulses.npz')
+    assert (tmp_path / 'pc1.png').stat().st_size > 10000 and (tmp_path / 'pc2.png').stat().st_size > 10000
+
+
+def test_03_opens_two_figures_with_one_show(monkeypatch, tmp_path, shown):
+    run_macro(monkeypatch, WAVEFORMS, waveform_file(tmp_path))
+    assert len(shown) == 1 and len(shown[0]) == 2
+
+
+def test_03_refuses_what_it_cannot_do(monkeypatch, tmp_path):
+    write_pulses(tmp_path / 'notrigger.npz', nwf=4, ref_position=0.0)
+    with pytest.raises(SystemExit, match='ref_position'):
+        run_macro(monkeypatch, WAVEFORMS, tmp_path / 'notrigger.npz')
+    for setting in ('REBIN = 0', 'STRIDE = 0'):
+        old = setting.split()[0] + ' = '
+        source = WAVEFORMS.read_text(encoding='utf-8')
+        line = next(x for x in source.splitlines() if x.startswith(old))
+        macro = edited(tmp_path, WAVEFORMS, **{line: setting + '  # test'})
+        with pytest.raises(SystemExit, match='1 以上'):
+            run_macro(monkeypatch, macro, waveform_file(tmp_path))
+
+
+# --- 04: the same figure as kidpack-iqplot -----------------------------------------------------------
+
+def same_scan_figure(mine, ref):
+    assert len(mine.axes) == len(ref.axes) == 3
+    for a, b in zip(mine.axes, ref.axes):
+        same_lines(a, b, rtol=1e-9, atol=1e-12)
+        assert (a.get_xlabel(), a.get_ylabel()) == (b.get_xlabel(), b.get_ylabel())
+    assert mine._suptitle.get_text() == ref._suptitle.get_text()
+
+
+@pytest.mark.parametrize('db, wrap', [(False, False), (True, False), (False, True)])
+def test_04_draws_what_kidpack_iqplot_draws(monkeypatch, tmp_path, db, wrap):
+    path = scan_file(tmp_path, delay=2e-6, power=-12.5)  # 2 us of cable: the phase turns many times
+    changes = {}
+    if db:
+        changes['DB = False'] = 'DB = True'
+    if wrap:
+        changes['WRAP = False'] = 'WRAP = True'
+    ns = run_macro(monkeypatch, edited(tmp_path, IQSCAN, **changes), path)
+    same_scan_figure(ns['fig'], plot_scan(load_iqscan(path), db=db, wrap=wrap))
+    phase = ns['ax'][2].lines[0].get_ydata()
+    assert (np.abs(phase) <= np.pi + 1e-12).all() if wrap else (phase.max() - phase.min() > 4 * np.pi)
+    assert '-12.5 dBm' in ns['fig']._suptitle.get_text() and 'uncalibrated' in ns['fig']._suptitle.get_text()
+
+
+def test_04_reads_the_files_of_the_old_iq_scan_py(monkeypatch, tmp_path):
+    path = scan_file(tmp_path)  # only dd, no power_dbm
+    ns = run_macro(monkeypatch, IQSCAN, path)
+    assert 'dBm' not in ns['fig']._suptitle.get_text() and ns['power_dbm'] is None
+    # mV, not V: the dip is the resonator (0.4 of the off-resonance size), the circle is 10 mV across
+    magnitude = ns['ax'][1].lines[0].get_ydata()
+    assert magnitude.min() == pytest.approx(0.4 * 10, rel=1e-3) and magnitude.max() < 10.3
+
+
+def test_04_with_a_reference_it_draws_s21(monkeypatch, tmp_path):
+    scan = scan_file(tmp_path, 'scan.npz', delay=80e-9, gain=0.02)
+    ref = scan_file(tmp_path, 'through.npz', dip=False, delay=80e-9, gain=0.02)  # the same cable and gain, no resonator
+    ns = run_macro(monkeypatch, IQSCAN, scan, ref)
+    x = 2 * (F_SCAN - 5.326e9) / 0.4e6
+    true = 1 - 0.6 / (1 + 1j * x)  # the cable and the gain cancel
+    np.testing.assert_allclose(ns['ax'][1].lines[0].get_ydata(), np.abs(true), rtol=1e-9)
+    np.testing.assert_allclose(ns['ax'][0].lines[0].get_xdata(), true.real, atol=1e-12)
+    np.testing.assert_allclose(ns['ax'][2].lines[0].get_ydata(), np.unwrap(np.angle(true)), atol=1e-9)
+    assert ns['ax'][1].get_ylabel() == '|S21|' and 'ref through' in ns['fig']._suptitle.get_text()
+    same_scan_figure(ns['fig'], plot_scan(load_iqscan(scan), load_iqscan(ref)))
+
+
+def test_04_reference_is_given_as_the_second_argument_or_REF_FILENAME(monkeypatch, tmp_path):
+    scan_file(tmp_path, 'scan.npz')
+    ref = scan_file(tmp_path, 'through.npz', dip=False)
+    by_argument = run_macro(monkeypatch, IQSCAN, tmp_path / 'scan.npz', ref)['ax'][1].lines[0].get_ydata()
+    macro = edited(tmp_path, IQSCAN, **{'REF_FILENAME = None': f'REF_FILENAME = {str(ref)!r}'})
+    by_variable = run_macro(monkeypatch, macro, tmp_path / 'scan.npz')['ax'][1].lines[0].get_ydata()
+    np.testing.assert_array_equal(by_argument, by_variable)
+
+
+def test_04_a_reference_at_other_frequencies_is_refused(monkeypatch, tmp_path):
+    scan_file(tmp_path, 'scan.npz')
+    other = tmp_path / 'other.npz'
+    np.savez(other, dd=np.column_stack([F_SCAN + 1e6, np.ones(41), np.zeros(41)]))
+    with pytest.raises(SystemExit, match='周波数が違います'):
+        run_macro(monkeypatch, IQSCAN, tmp_path / 'scan.npz', other)
+    short = tmp_path / 'short.npz'
+    np.savez(short, dd=np.column_stack([F_SCAN[:5], np.ones(5), np.zeros(5)]))
+    with pytest.raises(SystemExit, match='周波数が違います'):
+        run_macro(monkeypatch, IQSCAN, tmp_path / 'scan.npz', short)
+
+
+def test_04_a_file_that_is_not_an_iq_scan_is_reported(monkeypatch, tmp_path):
+    np.savez(tmp_path / 'wf.npz', ch0=np.zeros((2, 5)))
+    with pytest.raises(SystemExit, match='"dd" がありません'):
+        run_macro(monkeypatch, IQSCAN, tmp_path / 'wf.npz')
+    np.savez(tmp_path / 'bad.npz', dd=np.zeros((4, 2)))
+    with pytest.raises(SystemExit, match='形は'):
+        run_macro(monkeypatch, IQSCAN, tmp_path / 'bad.npz')
+    scan = scan_file(tmp_path)
+    with pytest.raises(SystemExit, match='IQ スキャンのファイルではありません'):
+        run_macro(monkeypatch, IQSCAN, scan, tmp_path / 'wf.npz')
+
+
+def test_04_saves_the_figure_only_if_asked(monkeypatch, tmp_path, shown):
+    scan = scan_file(tmp_path)
+    run_macro(monkeypatch, IQSCAN, scan)
+    assert list(tmp_path.glob('*.png')) == [] and len(shown) == 1 and len(shown[0]) == 1
+    target = tmp_path / 'figure.png'
+    run_macro(monkeypatch, edited(tmp_path, IQSCAN, **{'SAVE_PNG = None': f'SAVE_PNG = {str(target)!r}'}), scan)
+    assert target.stat().st_size > 10000
+
+
+# --- 03 and 04 in a notebook: the same rules as 02 -----------------------------------------------------
+
+NEW_MACROS = [pytest.param(WAVEFORMS, waveform_file, id='03_plot_waveforms'),
+              pytest.param(IQSCAN, scan_file, id='04_plot_iqscan')]
+
+
+@pytest.mark.parametrize('macro, make_file', NEW_MACROS)
+def test_new_macros_print_the_usage_for_no_file_or_too_many(monkeypatch, capsys, tmp_path, macro, make_file):
+    for argv in ([], ['a.npz', 'b.npz', 'c.npz']) if macro == IQSCAN else ([], ['a.npz', 'b.npz']):
+        with pytest.raises(SystemExit) as exit_info:
+            run_macro(monkeypatch, macro, *argv)
+        assert exit_info.value.code == 1 and '使い方' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('macro, make_file', NEW_MACROS)
+def test_new_macros_in_a_notebook_without_FILENAME_say_where_to_write_it(monkeypatch, capsys, macro, make_file):
+    monkeypatch.setattr(sys, 'argv', JUPYTER_ARGV)
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(str(macro), run_name='__main__')
+    out = capsys.readouterr().out
+    assert exit_info.value.code == 1 and '使い方' in out and 'FILENAME' in out
+
+
+@pytest.mark.parametrize('macro, make_file', NEW_MACROS)
+def test_new_macros_report_a_missing_file_in_plain_words(monkeypatch, tmp_path, macro, make_file):
+    with pytest.raises(SystemExit, match='ファイルが見つかりません'):
+        run_macro(monkeypatch, macro, tmp_path / 'nothing.npz')
+    edited_macro = edited(tmp_path, macro, **filename_setting(tmp_path / 'nothing.npz'))
+    monkeypatch.setattr(sys, 'argv', JUPYTER_ARGV)
+    with pytest.raises(SystemExit, match='ファイルが見つかりません'):
+        runpy.run_path(str(edited_macro), run_name='__main__')
+
+
+@pytest.mark.parametrize('macro, make_file', NEW_MACROS)
+def test_new_macros_take_the_file_name_from_FILENAME_in_a_notebook(monkeypatch, tmp_path, macro, make_file):
+    path = make_file(tmp_path)
+    edited_macro = edited(tmp_path, macro, **filename_setting(path))
+    monkeypatch.setattr(sys, 'argv', JUPYTER_ARGV)  # Jupyter's own arguments are not the macro's
+    namespace = runpy.run_path(str(edited_macro), run_name='__main__')
+    assert namespace['filename'] == str(path)
+
+
+@pytest.mark.parametrize('macro, make_file', NEW_MACROS)
+def test_new_macros_prefer_an_argument_of_the_command_line_to_FILENAME(monkeypatch, tmp_path, macro, make_file):
+    one, two = make_file(tmp_path, 'one.npz'), make_file(tmp_path, 'two.npz')
+    edited_macro = edited(tmp_path, macro, **filename_setting(one))
+    namespace = run_macro(monkeypatch, edited_macro, two)
+    assert namespace['filename'] == str(two)
+
+
+@pytest.mark.parametrize('macro, make_file', NEW_MACROS)
+def test_new_macros_in_a_real_jupyter_kernel(tmp_path, macro, make_file):
+    """Pasted into a cell (with FILENAME) and %run with a file name, in a real kernel; skipped without Jupyter."""
+    nbformat = pytest.importorskip('nbformat')
+    nbclient = pytest.importorskip('nbclient')
+    pytest.importorskip('ipykernel')
+    path = make_file(tmp_path)
+    pasted = edited(tmp_path, macro, **filename_setting(path)).read_text(encoding='utf-8')
+    notebook = nbformat.v4.new_notebook()
+    notebook.cells = [nbformat.v4.new_code_cell(c) for c in (pasted, f'%run {macro} {path}', pasted)]
+    nbclient.NotebookClient(notebook, timeout=240, kernel_name='python3', allow_errors=False,
+                            resources={'metadata': {'path': str(tmp_path)}}).execute()
+    figures_per_cell = 2 if macro == WAVEFORMS else 1
+    for cell in notebook.cells:
+        figures = [o for o in cell.outputs if o.output_type == 'display_data' and 'image/png' in o.data]
+        assert len(figures) == figures_per_cell

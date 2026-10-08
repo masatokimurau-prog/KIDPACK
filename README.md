@@ -155,7 +155,9 @@ matplotlib; no kidpack needed) to hand out; see `examples/README.md`.
 `01_kid_response_toymc.py` computes the response of a KID from the ideal S21 of a
 notch resonator and compares it for different parameters; `02_pulse_analysis.py`
 analyses a waveform file (pedestal, peak, half-max times, integral; rebin 5) and
-histograms the pedestals.
+histograms the pedestals; `03_plot_waveforms.py` draws the figures of `kidpack-monitor`
+(IQ plane and waveforms of 16 events) and `04_plot_iqscan.py` those of `kidpack-iqplot`
+(an IQ scan: IQ plane, |S21| and phase). All of them also run in a Jupyter notebook.
 
 ## Sample data
 
