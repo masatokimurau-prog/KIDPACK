@@ -86,7 +86,7 @@ Online check of a raw NPZ file: pc1 (IQ plane) and pc2 (waveforms) of 16 events 
 | Option | Allowed values | Default | Meaning |
 |---|---|---|---|
 | `file` (positional) | path of a raw `.npz` file | - | raw .npz file (default: the newest one under --data-dir) |
-| `--run-number` `N\|test` | integer, 0 or more; or `test` | - | instead of FILE: the file of this run under --data-dir (run_XX/data/runXX-YY.npz); with --file-number that file, otherwise the one with the highest file number |
+| `--run-number` `N\|test\|MMDD_HHMMSS` | integer, 0 or more; `test`; or a start time `MMDD_HHMMSS` (e.g. `0831_155251`) | - | instead of FILE: the file of this run under --data-dir (run_XX/data/runXX-YY.npz); with --file-number that file, otherwise the one with the highest file number. Besides a number and "test", a run can be named after its start (0831_155251, as made by kidpack.legacy from files of the old DAQ macro) |
 | `--file-number` `M` | integer, 0 or more (needs `--run-number`) | - | file number YY within the run given by --run-number |
 | `--data-dir` | directory path | `<KIDPACK>/data` | where to look for the newest file |
 | `--output-dir` | directory path | `.` | where pc1.png and pc2.png are written |
@@ -97,7 +97,7 @@ Online check of a raw NPZ file: pc1 (IQ plane) and pc2 (waveforms) of 16 events 
 
 ### Rules
 
-- The file is chosen in this order: `file`; or `--run-number` (with `--file-number`: `<data-dir>/run_XX/data/runXX-YY.npz`, without it the file with the highest file number of that run); or, with none of them, the newest `run*-*.npz` under `--data-dir`.
+- The file is chosen in this order: `file`; or `--run-number` (with `--file-number`: `<data-dir>/run_XX/data/runXX-YY.npz`, without it the file with the highest file number of that run); or, with none of them, the newest `run*-*.npz` under `--data-dir`. A run named after its start (`--run-number 0831_155251`: `run_0831_155251/data/run0831_155251-00.npz`) is one made from a file of the old DAQ macro by `kidpack.legacy`; `kidpack-daq` writes only numbers and `test`.
 - `file` and `--run-number` / `--file-number` cannot be given together; `--file-number` needs `--run-number`.
 
 ## kidpack-iqscan

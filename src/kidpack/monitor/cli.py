@@ -11,7 +11,7 @@ from kidpack.monitor.pulses import (DEFAULT_REBIN, N_EVENTS, SAVE_DPI, SHOW_FIGS
                                     make_pulse_view, plot_iq_plane, plot_waveforms,
                                     select_events)
 from kidpack.rawdata import RawDataError, load_raw
-from kidpack.runs import file_number_arg, find_run_file, run_number_arg
+from kidpack.runs import file_number_arg, find_run_file, run_label_arg
 
 
 def find_latest_raw_file(data_dir):
@@ -31,9 +31,11 @@ def build_parser():
                     f'windows (close them to exit). The data is only read.')
     p.add_argument('file', nargs='?',
                    help='raw .npz file (default: the newest one under --data-dir)')
-    p.add_argument('--run-number', type=run_number_arg, default=None, metavar='N|test',
+    p.add_argument('--run-number', type=run_label_arg, default=None, metavar='N|test|MMDD_HHMMSS',
                    help='instead of FILE: the file of this run under --data-dir (run_XX/data/runXX-YY.npz); '
-                        'with --file-number that file, otherwise the one with the highest file number')
+                        'with --file-number that file, otherwise the one with the highest file number. '
+                        'Besides a number and "test", a run can be named after its start (0831_155251, '
+                        'as made by kidpack.legacy from files of the old DAQ macro)')
     p.add_argument('--file-number', type=file_number_arg, default=None, metavar='M',
                    help='file number YY within the run given by --run-number')
     p.add_argument('--data-dir', default=default_output_dir(),

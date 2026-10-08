@@ -1,6 +1,6 @@
 """Convert files of the old DAQ macro (kid.py) to the current raw-data format.
 
-Old file (wf_YYMMDD_HHMMSS_xxHz.npz)       current file (run_XX/data/runXX-YY.npz)
+Old file (wf_YYMMDD_HHMMSS_xxHz.npz)       current file (run_MMDD_HHMMSS/data/runMMDD_HHMMSS-00.npz)
     ch0, ch1  float32 (n, npts)       ->     ch0, ch1                 unchanged
     deltat    timedelta per event     ->     timestamp_unix_ns        start + deltat [ns]
     (file name: start of the DAQ)     ->     run_start_unix_ns        start [ns]
@@ -9,8 +9,10 @@ Old file (wf_YYMMDD_HHMMSS_xxHz.npz)       current file (run_XX/data/runXX-YY.np
     ref_position (int32)              ->     ref_position             float64
     daq_rate                          ->     only in the YAML and the run summary
 
-Each old file becomes one run (file number 00), numbered in the order of the start
-times. Two things are not in the old files and have to be assumed:
+Each old file becomes one run (file number 00), named after the start in its file name:
+wf_260831_155251_49.55Hz.npz -> run_0831_155251/data/run0831_155251-00.npz (the year is not part
+of the name). The same file always gets the same name, whatever else is converted with it.
+Two things are not in the old files and have to be assumed:
 
 * The start of the DAQ is only known from the file name, to the second (kid.py cut
   the fraction off). The times of the events relative to each other are exact (deltat
@@ -35,7 +37,7 @@ from kidpack import __version__
 from kidpack.daq.summary import append_run_summary
 from kidpack.daq.timeutil import iso_utc
 from kidpack.daq.writer import atomic_write, raw_arrays
-from kidpack.runs import file_stem, next_run_number, run_dir_name
+from kidpack.runs import file_stem, is_dated_label, run_dir_name
 
 JST = timezone(timedelta(hours=9))
 SUMMARY_NAME = 'run_summary.txt'
@@ -51,6 +53,7 @@ class LegacyFileError(ValueError):
 @dataclass
 class OldRun:
     path: str
+    label: str  # MMDD_HHMMSS of the file name: the name of the run
     start_ns: int  # start of the DAQ (from the file name)
     ch0: np.ndarray
     ch1: np.ndarray
@@ -63,7 +66,7 @@ class OldRun:
 
 @dataclass
 class ConvertedRun:
-    run_number: int
+    label: str  # name of the run: MMDD_HHMMSS
     run_dir: str
     npz_path: str
     source: str
@@ -73,13 +76,31 @@ class ConvertedRun:
     condition: str
 
 
-def start_ns_from_name(path, tz=JST):
-    """Unix time [ns] of the YYMMDD_HHMMSS in a file name wf_YYMMDD_HHMMSS_xxHz.npz, in ``tz``."""
+def _name_match(path):
     match = _FILE_NAME.search(os.path.basename(str(path)))
     if match is None:
         raise LegacyFileError(f'{path}: the file name does not contain wf_YYMMDD_HHMMSS_ (start of the DAQ)')
-    naive = datetime.strptime(match.group(1) + match.group(2), '%y%m%d%H%M%S')
+    return match
+
+
+def start_ns_from_name(path, tz=JST):
+    """Unix time [ns] of the YYMMDD_HHMMSS in a file name wf_YYMMDD_HHMMSS_xxHz.npz, in ``tz``."""
+    match = _name_match(path)
+    try:
+        naive = datetime.strptime(match.group(1) + match.group(2), '%y%m%d%H%M%S')
+    except ValueError as e:
+        raise LegacyFileError(f'{path}: the start time in the file name is not a date and time ({e})') from e
     return timegm(naive.replace(tzinfo=tz).utctimetuple()) * 10 ** 9  # whole seconds: exact
+
+
+def label_from_name(path):
+    """Name of the run of a file: wf_260831_155251_49.55Hz.npz -> 0831_155251 (MMDD_HHMMSS)."""
+    match = _name_match(path)
+    start_ns_from_name(path)  # the date and the time must exist (a day like 260231 does not)
+    label = f'{match.group(1)[2:]}_{match.group(2)}'
+    if not is_dated_label(label):  # (a leap second 60 is accepted above, but is not a run name)
+        raise LegacyFileError(f'{path}: {label!r} is not a run name')
+    return label
 
 
 def _timedelta_ns(delta):
@@ -90,6 +111,7 @@ def load_old_file(path, tz=JST):
     """Read one file of the old DAQ macro (never modifies it)."""
     path = str(path)
     start_ns = start_ns_from_name(path, tz)
+    label = label_from_name(path)
     with np.load(path, allow_pickle=True) as d:  # deltat is a pickled array of timedeltas
         missing = [key for key in _OLD_KEYS if key not in d.files]
         if missing:
@@ -110,36 +132,39 @@ def load_old_file(path, tz=JST):
         raise LegacyFileError(f'{path}: the event times in deltat are not increasing')
     if daq_rate is None:  # as kid.py computed it: events per second of the whole acquisition
         daq_rate = len(deltat) / (offsets[-1] / 1e9)
-    return OldRun(path, start_ns, ch0, ch1, start_ns + offsets, npts, sample_rate, ref_position, daq_rate)
+    return OldRun(path, label, start_ns, ch0, ch1, start_ns + offsets, npts, sample_rate, ref_position,
+                  daq_rate)
 
 
-def convert_old_files(items, output_dir, tz=JST, first_run_number=None, source_root=None):
+def convert_old_files(items, output_dir, tz=JST, source_root=None):
     """Write each old file as a run of ``output_dir``; returns the ConvertedRun list.
 
-    items: (path of an old file, condition text) pairs. Runs are numbered in the order of
-    the start times, from ``first_run_number`` (default: the next free number). Existing
-    runs are never overwritten. ``output_dir`` also gets the run summary.
+    items: (path of an old file, condition text) pairs. A run is named after the start in its
+    file name (0831_155251); the runs are written, and added to the run summary of
+    ``output_dir``, in the order of the start times. Existing runs are never overwritten, and
+    nothing is written if any of the runs exists or two files would get the same name.
     """
     runs = sorted(((load_old_file(path, tz), condition) for path, condition in items),
                   key=lambda pair: pair[0].start_ns)
-    summary = os.path.join(output_dir, SUMMARY_NAME)
-    number = first_run_number if first_run_number is not None else next_run_number(output_dir, summary)
-    for offset in range(len(runs)):  # check everything before writing anything
-        directory = os.path.join(output_dir, run_dir_name(number + offset))
+    labels = [old.label for old, _ in runs]
+    for label in sorted(set(labels)):
+        if labels.count(label) > 1:
+            raise LegacyFileError(f'{label}: more than one file starts in that second: '
+                                  + ', '.join(old.path for old, _ in runs if old.label == label))
+    for label in labels:  # check everything before writing anything
+        directory = os.path.join(output_dir, run_dir_name(label))
         if os.path.exists(directory):
             raise FileExistsError(f'run directory already exists: {directory}')
 
-    converted = []
-    for offset, (old, condition) in enumerate(runs):
-        converted.append(_write_run(old, condition, number + offset, output_dir, summary, source_root))
-    return converted
+    summary = os.path.join(output_dir, SUMMARY_NAME)
+    return [_write_run(old, condition, output_dir, summary, source_root) for old, condition in runs]
 
 
-def _write_run(old, condition, run_number, output_dir, summary, source_root):
-    run_dir = os.path.join(output_dir, run_dir_name(run_number))
+def _write_run(old, condition, output_dir, summary, source_root):
+    run_dir = os.path.join(output_dir, run_dir_name(old.label))
     os.makedirs(os.path.join(run_dir, 'data'))
     os.makedirs(os.path.join(run_dir, 'config'))
-    stem = file_stem(run_number, 0)
+    stem = file_stem(old.label, 0)
     npz_path = os.path.join(run_dir, 'data', stem + '.npz')
 
     arrays = raw_arrays(old.ch0, old.ch1, old.timestamp_unix_ns, old.npts, old.sample_rate,
@@ -150,7 +175,7 @@ def _write_run(old, condition, run_number, output_dir, summary, source_root):
     stop_ns = int(old.timestamp_unix_ns[-1])
     source = os.path.relpath(old.path, source_root) if source_root else os.path.basename(old.path)
     document = {
-        'run_number': run_number,
+        'run_number': old.label,
         'file_number': 0,
         'events_per_file': n,
         'nevents': n,
@@ -182,5 +207,5 @@ def _write_run(old, condition, run_number, output_dir, summary, source_root):
     }
     atomic_write(os.path.join(run_dir, 'config', stem + '.yaml'),
                  lambda f: yaml.safe_dump(document, f, sort_keys=False, allow_unicode=True), 'w')
-    append_run_summary(summary, run_number, old.start_ns, stop_ns, old.daq_rate_hz, condition)
-    return ConvertedRun(run_number, run_dir, npz_path, source, old.start_ns, stop_ns, n, condition)
+    append_run_summary(summary, old.label, old.start_ns, stop_ns, old.daq_rate_hz, condition)
+    return ConvertedRun(old.label, run_dir, npz_path, source, old.start_ns, stop_ns, n, condition)

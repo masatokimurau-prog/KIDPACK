@@ -121,7 +121,8 @@ def numbers(option, bad, ok):
 
 VALUES = {
     # kidpack-daq
-    ('kidpack-daq', '--run-number'): v('--run-number', ['-1', 'abc', 'Test', '1.5', ''], ['0', '12', 'test']),
+    ('kidpack-daq', '--run-number'): v('--run-number', ['-1', 'abc', 'Test', '1.5', '', '0831_155251'],
+                                       ['0', '12', 'test']),  # (the DAQ writes numbers and test only)
     ('kidpack-daq', '--events-per-file'): v('--events-per-file', ['0', '-5', '1.5'], ['1', '1000']),
     ('kidpack-daq', '--num-files'): v('--num-files', ['0', '-1'], ['1', '50']),
     ('kidpack-daq', '--condition'): v('--condition', [], ['temp 5.5K; lna 1.9V', '']),
@@ -148,7 +149,9 @@ VALUES = {
     ('kidpack-daq', '--sg-resource'): v('--sg-resource', [], ['PXI2Slot3'], companions=['--sg-frequency', '5e9', '--sg-power', '0']),
     # kidpack-monitor
     ('kidpack-monitor', 'file'): {'bad': [], 'ok': [['some.npz']]},
-    ('kidpack-monitor', '--run-number'): v('--run-number', ['-1', 'abc', 'Test', '1.5'], ['0', '12', 'test']),
+    ('kidpack-monitor', '--run-number'): v('--run-number', ['-1', 'abc', 'Test', '1.5', '0831_15525', '1331_155251',
+                                                             '0831-155251', '../0831_155251'],
+                                           ['0', '12', 'test', '0831_155251', '1231_235959']),
     ('kidpack-monitor', '--file-number'): v('--file-number', ['-1', 'abc', '1.5'], ['0', '3'],
                                             companions=['--run-number', '1']),
     ('kidpack-monitor', '--data-dir'): v('--data-dir', [], ['data']),

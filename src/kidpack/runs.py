@@ -2,6 +2,10 @@
 
     run_07/data/run07-03.npz         run number 7, file number 3
     run_test/data/runtest-00.npz     the special run "test", replaced by every new test run
+    run_0831_155251/data/run0831_155251-00.npz
+                                     a run named after its start, MMDD_HHMMSS: files of the old
+                                     DAQ macro, converted by kidpack.legacy (the DAQ only writes
+                                     numbers and "test")
 """
 import argparse
 import glob
@@ -12,11 +16,18 @@ RUN_TEST = 'test'
 
 _RUN_DIR = re.compile(r'run_(\d+)')
 _DIGITS = re.compile(r'\d+', re.ASCII)
+# MMDD_HHMMSS: month 01-12, day 01-31, hour 00-23, minute and second 00-59
+_DATED = re.compile(r'(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])_([01][0-9]|2[0-3])[0-5][0-9][0-5][0-9]', re.ASCII)
 
 
 def is_valid_run_number(value):
     """A run number is an integer (0 or more) or the word "test"."""
     return value == RUN_TEST or (isinstance(value, int) and not isinstance(value, bool) and value >= 0)
+
+
+def is_dated_label(value):
+    """A run named after its start (month, day, hour, minute, second): "0831_155251"."""
+    return isinstance(value, str) and _DATED.fullmatch(value) is not None
 
 
 def run_number_arg(text):
@@ -28,6 +39,17 @@ def run_number_arg(text):
     raise argparse.ArgumentTypeError(f"invalid run number {text!r}: an integer (0 or more) or 'test'")
 
 
+def run_label_arg(text):
+    """argparse type of ``--run-number`` where a run is only read: also a name like 0831_155251."""
+    if is_dated_label(text):
+        return text
+    try:
+        return run_number_arg(text)
+    except argparse.ArgumentTypeError:
+        raise argparse.ArgumentTypeError(
+            f"invalid run {text!r}: an integer (0 or more), 'test' or a start time MMDD_HHMMSS") from None
+
+
 def file_number_arg(text):
     """argparse type of ``--file-number``: an integer, 0 or more."""
     if _DIGITS.fullmatch(text):
@@ -36,8 +58,12 @@ def file_number_arg(text):
 
 
 def run_label(run_number):
-    """07 for 7, test for "test": the XX of run_XX and runXX-YY."""
-    return run_number if run_number == RUN_TEST else f'{run_number:02d}'
+    """07 for 7, test for "test", 0831_155251 for that: the XX of run_XX and runXX-YY."""
+    if isinstance(run_number, str):
+        if run_number == RUN_TEST or is_dated_label(run_number):
+            return run_number
+        raise ValueError(f"invalid run {run_number!r}: an integer, 'test' or a start time MMDD_HHMMSS")
+    return f'{run_number:02d}'
 
 
 def run_dir_name(run_number):
@@ -53,7 +79,8 @@ def next_run_number(output_dir, summary_path=None):
 
     In use are the run_NN directories of ``output_dir`` and the numbers in the first
     column of the run summary (so that the number of a run whose directory was deleted
-    is not used again). "test" runs are not numbers and are ignored.
+    is not used again). "test" runs and runs named after their start are not numbers and
+    are ignored.
     """
     numbers = []
     if os.path.isdir(output_dir):
@@ -72,7 +99,8 @@ def next_run_number(output_dir, summary_path=None):
 
 
 def find_run_file(data_dir, run_number, file_number=None):
-    """Path of a raw file of a run; the highest file number if ``file_number`` is None.
+    """Path of a raw file of a run (a number, "test" or MMDD_HHMMSS); the highest file number
+    if ``file_number`` is None.
 
     Raises FileNotFoundError with a message saying what is missing and what exists.
     """

@@ -57,7 +57,7 @@ ALLOWED = {
     ('kidpack-daq', '--sg-resource'): 'resource name (only with `--sg-frequency` and `--sg-power`)',
     # ---- kidpack-monitor ----
     ('kidpack-monitor', 'file'): 'path of a raw `.npz` file',
-    ('kidpack-monitor', '--run-number'): 'integer, 0 or more; or `test`',
+    ('kidpack-monitor', '--run-number'): 'integer, 0 or more; `test`; or a start time `MMDD_HHMMSS` (e.g. `0831_155251`)',
     ('kidpack-monitor', '--file-number'): 'integer, 0 or more (needs `--run-number`)',
     ('kidpack-monitor', '--data-dir'): 'directory path',
     ('kidpack-monitor', '--output-dir'): 'directory path',
@@ -111,7 +111,10 @@ RULES = {
     'kidpack-monitor': [
         'The file is chosen in this order: `file`; or `--run-number` (with `--file-number`: '
         '`<data-dir>/run_XX/data/runXX-YY.npz`, without it the file with the highest file number of '
-        'that run); or, with none of them, the newest `run*-*.npz` under `--data-dir`.',
+        'that run); or, with none of them, the newest `run*-*.npz` under `--data-dir`. A run named '
+        'after its start (`--run-number 0831_155251`: `run_0831_155251/data/run0831_155251-00.npz`) is '
+        'one made from a file of the old DAQ macro by `kidpack.legacy`; `kidpack-daq` writes only '
+        'numbers and `test`.',
         '`file` and `--run-number` / `--file-number` cannot be given together; `--file-number` needs '
         '`--run-number`.',
     ],

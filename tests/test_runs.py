@@ -2,8 +2,9 @@ import argparse
 
 import pytest
 
-from kidpack.runs import (RUN_TEST, file_number_arg, file_stem, find_run_file, is_valid_run_number,
-                          next_run_number, run_dir_name, run_label, run_number_arg)
+from kidpack.runs import (RUN_TEST, file_number_arg, file_stem, find_run_file, is_dated_label,
+                          is_valid_run_number, next_run_number, run_dir_name, run_label, run_label_arg,
+                          run_number_arg)
 
 
 def touch(path):
@@ -40,6 +41,67 @@ def test_names_of_run_directories_and_files():
     assert (run_label(7), run_dir_name(7), file_stem(7, 3)) == ('07', 'run_07', 'run07-03')
     assert (run_label(123), run_dir_name(123), file_stem(123, 12)) == ('123', 'run_123', 'run123-12')
     assert (run_label('test'), run_dir_name('test'), file_stem('test', 0)) == ('test', 'run_test', 'runtest-00')
+
+
+# --- runs named after their start (files of the old DAQ macro) -------------------------------------
+
+GOOD_DATED = ['0831_155251', '0101_000000', '1231_235959', '0229_120000']
+BAD_DATED = ['0831_15525', '0831_1552510', '831_155251', '0831-155251', '1331_155251',
+             '0800_155251', '0832_155251', '0831_245251', '0831_156251', '0831_155260', '0831_155251 ',
+             ' 0831_155251', '../0831_155251', '0831_155251/..', 'Test', '²831_155251', '']
+
+
+@pytest.mark.parametrize('label', GOOD_DATED)
+def test_a_start_time_is_a_run_name(label):
+    assert is_dated_label(label) and run_label_arg(label) == label
+    assert run_label(label) == label
+
+
+@pytest.mark.parametrize('label', BAD_DATED)
+def test_other_text_is_not_a_run_name(label):
+    assert not is_dated_label(label)
+    with pytest.raises(argparse.ArgumentTypeError, match='MMDD_HHMMSS'):
+        run_label_arg(label)
+    with pytest.raises(ValueError, match='MMDD_HHMMSS'):  # nothing but a safe name becomes part of a path
+        run_label(label)
+
+
+def test_the_daq_still_takes_only_numbers_and_test():
+    assert not is_valid_run_number('0831_155251')
+    with pytest.raises(argparse.ArgumentTypeError):
+        run_number_arg('0831_155251')
+
+
+def test_where_a_run_is_only_read_numbers_and_test_are_still_accepted():
+    assert run_label_arg('12') == 12 and run_label_arg('test') == 'test'
+    assert run_label_arg('0831155251') == 831155251  # without the _ it is just a (big) number
+    for bad in ('-1', '1.5', 'abc', 'Test'):
+        with pytest.raises(argparse.ArgumentTypeError):
+            run_label_arg(bad)
+
+
+def test_names_of_a_run_named_after_its_start():
+    assert (run_label('0831_155251'), run_dir_name('0831_155251'), file_stem('0831_155251', 0)) == (
+        '0831_155251', 'run_0831_155251', 'run0831_155251-00')
+
+
+def test_a_run_named_after_its_start_is_found_like_any_other(tmp_path):
+    touch(tmp_path / 'run_0831_155251' / 'data' / 'run0831_155251-00.npz')
+    touch(tmp_path / 'run_0831_155251' / 'data' / 'run0831_155251-02.npz')
+    touch(tmp_path / 'run_0831_155252' / 'data' / 'run0831_155252-00.npz')  # another run: not mixed up
+    assert find_run_file(tmp_path, '0831_155251', 0).endswith('run0831_155251-00.npz')
+    assert find_run_file(tmp_path, '0831_155251').endswith('run0831_155251-02.npz')  # the highest file number
+    with pytest.raises(FileNotFoundError, match='0831_155259'):
+        find_run_file(tmp_path, '0831_155259')
+
+
+def test_runs_named_after_their_start_are_not_numbers(tmp_path):
+    (tmp_path / 'run_03').mkdir()
+    (tmp_path / 'run_0831_155251').mkdir()  # not run_08 or run_831: the name is not a number
+    summary = tmp_path / 'run_summary.txt'
+    summary.write_text('run_number\tstart_time\tstop_time\tdaq_rate_hz\tcondition\n'
+                       '0831_155251\ta\tb\t1.0\t\n')
+    assert next_run_number(tmp_path, summary) == 4
 
 
 # --- the next free run number ------------------------------------------------------------------
