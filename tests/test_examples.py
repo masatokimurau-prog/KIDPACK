@@ -262,6 +262,63 @@ def test_with_only_T_hot_the_base_temperature_stays_as_it_is(monkeypatch):
     assert 'delta_T = 0.5 K' in plt.figure(2).axes[1].get_title()  # 6.0 - 5.5
 
 
+# --- in a Jupyter notebook ------------------------------------------------------------------------
+
+def test_in_a_notebook_cell_the_arguments_of_jupyter_are_not_the_arguments_of_the_macro(monkeypatch, shown):
+    """Pasted into a cell the file runs as __main__ with sys.argv = ['...ipykernel_launcher.py', '-f', kernel.json]."""
+    monkeypatch.setattr(sys, 'argv', ['/x/ipykernel_launcher.py', '-f', '/x/kernel-1234.json'])
+    runpy.run_path(str(TOYMC), run_name='__main__')  # (it used to stop with: could not convert string to float: '-f')
+    assert len(shown) == 1 and len(shown[0]) == 4
+    assert 'delta_T = 0.5 K' in plt.figure(2).axes[1].get_title()  # the settings of the file
+
+
+def test_a_bad_argument_of_the_command_line_is_still_an_error(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['01_kid_response_toymc.py', 'abc'])
+    with pytest.raises(ValueError, match='abc'):
+        runpy.run_path(str(TOYMC), run_name='__main__')
+
+
+def test_main_takes_T_hot_and_T_base_as_arguments(toy, shown):
+    toy.main(6.5, 5.0)
+    temperature = plt.figure(2).axes[0].lines[0].get_ydata()
+    assert temperature[0] == pytest.approx(5.0) and 'delta_T = 1.5 K' in plt.figure(2).axes[1].get_title()
+    assert 'T_base = 5, delta_T = 1.5 fixed' in plt.figure(3)._suptitle.get_text()  # the comparisons use it too
+
+
+def test_running_main_again_gives_the_same_result_the_settings_are_not_changed(toy, shown):
+    before = dict(toy.SETTINGS)
+    toy.main(6.5, 5.0)
+    assert toy.SETTINGS == before  # (a notebook cell is run again and again)
+    plt.close('all')
+    toy.main()
+    assert 'delta_T = 0.5 K' in plt.figure(2).axes[1].get_title() and toy.SETTINGS == before
+
+
+def test_compare_can_be_given_the_settings_to_start_from(toy):
+    fig = toy.compare('T_base', [5.0, 6.0], settings={**toy.SETTINGS, 'delta_T': 1.0})
+    assert 'delta_T = 1' in fig._suptitle.get_text()
+    assert toy.SETTINGS['delta_T'] == 0.5  # the module's own settings are not touched
+
+
+def test_the_toy_mc_in_a_real_jupyter_kernel(tmp_path):
+    """The file pasted into a cell, %run, and main(T_hot, T_base): all run and show the 4 figures.
+
+    Needs ipykernel and nbclient (not installed by kidpack): skipped where there is no Jupyter.
+    """
+    nbformat = pytest.importorskip('nbformat')
+    nbclient = pytest.importorskip('nbclient')
+    pytest.importorskip('ipykernel')
+    source = TOYMC.read_text(encoding='utf-8')
+    cells = [source, f'%run {TOYMC}', 'main(6.0, 5.0)']
+    notebook = nbformat.v4.new_notebook()
+    notebook.cells = [nbformat.v4.new_code_cell(c) for c in cells]
+    nbclient.NotebookClient(notebook, timeout=180, kernel_name='python3', allow_errors=False,
+                            resources={'metadata': {'path': str(tmp_path)}}).execute()
+    for cell in notebook.cells:
+        figures = [o for o in cell.outputs if o.output_type == 'display_data' and 'image/png' in o.data]
+        assert len(figures) == 4
+
+
 # =============================================================================================
 # 02_pulse_analysis.py
 # =============================================================================================
@@ -428,3 +485,77 @@ def test_no_samples_before_the_trigger_means_no_pedestal(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, 'argv', ['02_pulse_analysis.py', str(tmp_path / 'notrigger.npz')])
     with pytest.raises(SystemExit, match='ref_position'):
         runpy.run_path(str(ANALYSIS), run_name='__main__')
+
+
+# --- in a Jupyter notebook ------------------------------------------------------------------------
+
+JUPYTER_ARGV = ['/x/ipykernel_launcher.py', '-f', '/x/kernel-1234.json']
+
+
+def with_filename(tmp_path, filename):
+    """What a student does in a notebook: the macro with the file name written after FILENAME = ."""
+    source = ANALYSIS.read_text(encoding='utf-8')
+    assert source.count('FILENAME = None') == 1  # the line to edit
+    path = tmp_path / 'macro_with_filename.py'
+    path.write_text(source.replace('FILENAME = None', f'FILENAME = {str(filename)!r}'), encoding='utf-8')
+    return path
+
+
+def test_in_a_notebook_cell_the_file_name_is_FILENAME(monkeypatch, tmp_path):
+    """Pasted into a cell, sys.argv is Jupyter's ['-f', ...json]: not an argument of the macro."""
+    write_pulses(tmp_path / 'pulses.npz', nwf=5)
+    macro = with_filename(tmp_path, tmp_path / 'pulses.npz')
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, 'argv', JUPYTER_ARGV)
+    namespace = runpy.run_path(str(macro), run_name='__main__')
+    table = np.genfromtxt(tmp_path / 'pulses_ana.csv', delimiter=',', names=True)
+    assert table.dtype.names == tuple(COLUMNS) and len(table) == 5
+    assert namespace['proj_max'].shape == (5,)  # the results are there for the next cell
+
+
+def test_in_a_notebook_without_FILENAME_the_usage_says_where_to_write_it(monkeypatch, capsys):
+    monkeypatch.setattr(sys, 'argv', JUPYTER_ARGV)
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(str(ANALYSIS), run_name='__main__')
+    out = capsys.readouterr().out
+    assert exit_info.value.code == 1 and '使い方' in out and 'FILENAME' in out
+
+
+def test_a_missing_FILENAME_is_reported_in_plain_words(monkeypatch, tmp_path):
+    macro = with_filename(tmp_path, tmp_path / 'nothing.npz')
+    monkeypatch.setattr(sys, 'argv', JUPYTER_ARGV)
+    with pytest.raises(SystemExit, match='ファイルが見つかりません'):
+        runpy.run_path(str(macro), run_name='__main__')
+
+
+def test_an_argument_of_the_command_line_wins_over_FILENAME(monkeypatch, tmp_path):
+    write_pulses(tmp_path / 'one.npz', nwf=3)
+    write_pulses(tmp_path / 'two.npz', nwf=4)
+    macro = with_filename(tmp_path, tmp_path / 'one.npz')
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, 'argv', ['02_pulse_analysis.py', str(tmp_path / 'two.npz')])  # also %run macro.py two.npz
+    runpy.run_path(str(macro), run_name='__main__')
+    assert len(np.genfromtxt(tmp_path / 'two_ana.csv', delimiter=',', names=True)) == 4
+    assert not (tmp_path / 'one_ana.csv').exists()
+
+
+def test_the_analysis_in_a_real_jupyter_kernel(tmp_path):
+    """The macro pasted into a cell (with FILENAME), and %run with a file name, in a real kernel.
+
+    Needs ipykernel and nbclient (not installed by kidpack): skipped where there is no Jupyter.
+    """
+    nbformat = pytest.importorskip('nbformat')
+    nbclient = pytest.importorskip('nbclient')
+    pytest.importorskip('ipykernel')
+    write_pulses(tmp_path / 'pulses.npz', nwf=6)
+    pasted = with_filename(tmp_path, tmp_path / 'pulses.npz').read_text(encoding='utf-8')
+    cells = [pasted, 'print(proj_max.shape)', f'%run {ANALYSIS} {tmp_path / "pulses.npz"}', pasted]
+    notebook = nbformat.v4.new_notebook()
+    notebook.cells = [nbformat.v4.new_code_cell(c) for c in cells]
+    nbclient.NotebookClient(notebook, timeout=180, kernel_name='python3', allow_errors=False,
+                            resources={'metadata': {'path': str(tmp_path)}}).execute()
+    assert [o['text'] for o in notebook.cells[1].outputs if o.output_type == 'stream'] == ['(6,)\n']
+    for number in (0, 2, 3):  # the histograms of the pedestals
+        figures = [o for o in notebook.cells[number].outputs if o.output_type == 'display_data' and 'image/png' in o.data]
+        assert len(figures) == 1
+    assert (tmp_path / 'pulses_ana.csv').is_file()

@@ -11,6 +11,13 @@
 このファイル 1 つだけで動きます (numpy と matplotlib が必要)。
 使い方: 下の 1. の値を書き換えて、もう一度実行してください。
 
+Jupyter ノートブックで使うとき
+------------------------------
+* このファイルの中身を 1 つのセルに貼って実行する (図が出る)。または、セルに
+      %run 01_kid_response_toymc.py
+  と書く。値を変えるには、上と同じように 1. の SETTINGS を書き換えて、もう一度実行する。
+* T_hot と T_base は、別のセルから main(6.0, 5.5) のように渡してもよい (コマンドラインの引数と同じ)。
+
 
 やっていること
 --------------
@@ -244,13 +251,14 @@ def format_value(name, value):
     return f'{value / 1e9:.3f} GHz' if name == 'f_readout' else f'{value:g}'
 
 
-def compare(name, values):
-    """SETTINGS のうち name だけを values の各値に変えて、応答を重ねて比較する。
+def compare(name, values, settings=None):
+    """SETTINGS (settings を渡せば、それ) のうち name だけを values の各値に変えて、応答を重ねて比較する。
 
     name = 'T_base' のときは delta_T が SETTINGS のまま変わらないので、定常温度だけを変えた
     比較になる (T_hot = T_base + delta_T は、いっしょに動く)。
     """
-    results = [simulate(**{**SETTINGS, name: value}) for value in values]
+    base = SETTINGS if settings is None else settings
+    results = [simulate(**{**base, name: value}) for value in values]
     labels = [f'{name} = {format_value(name, value)}' for value in values]
 
     fig, ax = plt.subplots(figsize=(14, 8), ncols=3, nrows=2)
@@ -280,7 +288,7 @@ def compare(name, values):
     ax_re.legend(fontsize='small')
 
     # 比べていない (そのまま) の設定のうち、パルスに関わるものをタイトルに書く
-    fixed = [f'{key} = {SETTINGS[key]:g}' for key in ('T_base', 'delta_T') if key != name]
+    fixed = [f'{key} = {base[key]:g}' for key in ('T_base', 'delta_T') if key != name]
     fig.suptitle(f'comparison of {name}' + (f'   ({", ".join(fixed)} fixed)' if fixed else ''))
     fig.tight_layout()
 
@@ -296,21 +304,36 @@ def compare(name, values):
 # =============================================================================
 # 5. 実行
 # =============================================================================
-def main():
-    # 引数があれば、T_hot と T_base を指定する (パルスの大きさは delta_T = T_hot - T_base)
-    if len(sys.argv) > 1:
-        T_hot = float(sys.argv[1])
-        if len(sys.argv) > 2:
-            SETTINGS['T_base'] = float(sys.argv[2])
-        SETTINGS['delta_T'] = T_hot - SETTINGS['T_base']  # 比較 (compare) でも同じ値を使う
+def command_line_numbers():
+    """コマンドラインの T_hot と T_base (python 01_kid_response_toymc.py 6.0 5.5)。数のリストで返す。
 
-    result = simulate(**SETTINGS)
+    ノートブックのセルでは、sys.argv に Jupyter 自身の引数 ['-f', '...json'] が入っている。
+    それはこのマクロの引数ではないので、読まない。
+    """
+    args = sys.argv[1:3]
+    if args[:1] == ['-f']:
+        return []
+    return [float(a) for a in args]
+
+
+def main(T_hot=None, T_base=None):
+    """図を描く。T_hot と T_base を渡すと、SETTINGS の T_base と delta_T の代わりにそれを使う。
+
+    delta_T = T_hot - T_base (T_base を渡さなければ SETTINGS の T_base)。SETTINGS は書き換えない。
+    """
+    settings = dict(SETTINGS)
+    if T_base is not None:
+        settings['T_base'] = T_base
+    if T_hot is not None:
+        settings['delta_T'] = T_hot - settings['T_base']  # 比較 (compare) でも同じ値を使う
+
+    result = simulate(**settings)
     plot_resonance_and_trajectory(result)
     plot_time_response(result)
     for name, values in COMPARISONS:
-        compare(name, values)
+        compare(name, values, settings)
     plt.show()
 
 
 if __name__ == '__main__':
-    main()
+    main(*command_line_numbers())

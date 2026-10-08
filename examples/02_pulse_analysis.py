@@ -8,6 +8,12 @@ DAQ が保存した波形ファイル (.npz) を読んで、イベントごと�
 このファイル 1 つだけで動きます (numpy と matplotlib が必要)。
 関数は使わずに、上から順に読めるように書いてあります。
 
+Jupyter ノートブックで使うとき
+------------------------------
+* このファイルの中身を 1 つのセルに貼って、下の FILENAME に波形ファイルの名前を書いて実行する。
+* または、セルに  %run 02_pulse_analysis.py  波形ファイル.npz  と書く。
+どちらも、図はセルの下に出て、計算した量 (proj_max など) は、あとのセルでそのまま使える。
+
 
 計算する量 (イベントごとに 1 つ)
 ---------------------------------
@@ -40,10 +46,17 @@ import numpy as np
 
 REBIN = 5  # 5 サンプルずつ平均する (この値で固定)
 
-if len(sys.argv) != 2:
+# ノートブックでは、ここに波形ファイルの名前を書く (コマンドラインでは、引数で渡すので、None のまま)
+FILENAME = None   # 例: 'run0831_153858-00.npz'
+
+args = sys.argv[1:]
+if args[:1] == ['-f']:       # ノートブックのセルでは、sys.argv は Jupyter の ['-f', '...json']。これはこのマクロの引数ではない
+    args = []
+if len(args) > 1 or (len(args) == 0 and FILENAME is None):
     print('使い方: python 02_pulse_analysis.py  波形ファイル.npz')
+    print('        (ノートブックでは、上の FILENAME に波形ファイルの名前を書く)')
     sys.exit(1)
-filename = sys.argv[1]
+filename = args[0] if args else FILENAME
 if not os.path.exists(filename):
     sys.exit(f'ファイルが見つかりません: {filename}')
 
