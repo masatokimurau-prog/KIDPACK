@@ -162,10 +162,9 @@ histograms the pedestals; `03_plot_waveforms.py` draws the figures of `kidpack-m
 ## Sample data
 
 `sample_data/` (git-ignored, 800 MB) holds 20 runs of 2026-08-31 taken with the old DAQ macro and
-converted to the current raw-data format (`kidpack.legacy`): the z-scans at x = 4.0 mm (9 points)
-and x = 3.5 mm (7 points) and the x-scan at z = 6.30 mm (5 points; its x = 3.50 mm file is the
-z = 6.30 mm file of the other z-scan, so it is one run). It is made from the old files, which are
-only read:
+converted to the current raw-data format (`kidpack.legacy`), at different detector positions
+(x = 3.20 ... 4.50 mm, z = 5.50 ... 6.90 mm; the position of each run is its condition, "x = 4.00 mm,
+z = 6.15 mm"). It is made from the old files, which are only read:
 
 ```bash
 python scripts/make_sample_data.py    # ../data/Aug31st/ -> sample_data/ (--old-data-dir, --output-dir)
@@ -177,7 +176,7 @@ A converted run is named after the start in the old file name, so that it can be
 `MMDD_HHMMSS`, no year). The DAQ itself still writes numbers and `test`; the monitor takes all three.
 The start of each run is known only from the old file name (to the second, taken as UTC+9), so
 absolute times are good to +-1 s; times between events are exact. `sample_data/README.md` (written by
-the script) has the table of runs and conditions and the list of changes.
+the script) has the table of runs and conditions.
 
 ## All options
 

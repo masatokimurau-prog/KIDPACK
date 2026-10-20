@@ -1,6 +1,7 @@
 """Conversion of the files of the old DAQ macro (kid.py) to the current raw-data format."""
 import hashlib
 import importlib.util
+import re
 import runpy
 import sys
 from datetime import datetime, timedelta, timezone
@@ -290,11 +291,10 @@ def make_sample_data():
 
 
 def fake_old_directory(module, root, skip=None, extra=None):
-    """Tiny old files named like the 20 z-scan / x-scan files (a different second in each pattern)."""
+    """Tiny old files named like the 20 files of the script (a different second in each pattern)."""
     directory = root / 'Aug31st'
     directory.mkdir(parents=True)
-    patterns = {pattern for _, _, entries in module.SCANS for pattern, _ in entries}  # a file is in 1-2 scans
-    for i, pattern in enumerate(sorted(patterns)):
+    for i, pattern in enumerate(sorted(pattern for pattern, _, _ in module.FILES)):
         if pattern == skip:
             continue
         name = pattern.split('/')[1].replace('?', '7').replace('*', '49.50Hz')
@@ -305,29 +305,28 @@ def fake_old_directory(module, root, skip=None, extra=None):
 
 
 # (name of the run, condition) in the order of the start times: the specification of sample_data/, for
-# the fake files above (their seconds are the digit 7 where the pattern has a ?). The 6.30 mm file of
-# the z-scan at x = 3.5 mm is also the 3.50 mm file of the x-scan, and is one run.
+# the fake files above (their seconds are the digit 7 where the pattern has a ?).
 EXPECTED_RUNS = [
-    ('0831_153857', 'x-scan at z = 6.30 mm, x = 4.00 mm'),
-    ('0831_154137', 'z-scan at x = 4.0 mm, z = 6.15 mm'),
-    ('0831_154217', 'z-scan at x = 4.0 mm, z = 6.00 mm'),
-    ('0831_154257', 'z-scan at x = 4.0 mm, z = 5.85 mm'),
-    ('0831_154347', 'z-scan at x = 4.0 mm, z = 5.70 mm'),
-    ('0831_154547', 'x-scan at z = 6.30 mm, x = 3.65 mm'),
-    ('0831_154747', 'z-scan at x = 3.5 mm, z = 6.90 mm'),
-    ('0831_154827', 'z-scan at x = 3.5 mm, z = 6.70 mm'),
-    ('0831_154907', 'z-scan at x = 3.5 mm, z = 6.50 mm'),
-    ('0831_154947', 'z-scan at x = 3.5 mm, z = 6.30 mm; x-scan at z = 6.30 mm, x = 3.50 mm'),
-    ('0831_155027', 'z-scan at x = 3.5 mm, z = 6.00 mm'),
-    ('0831_155147', 'z-scan at x = 3.5 mm, z = 5.70 mm'),
-    ('0831_155257', 'x-scan at z = 6.30 mm, x = 3.20 mm'),
-    ('0831_155427', 'x-scan at z = 6.30 mm, x = 4.50 mm'),
-    ('0831_155547', 'z-scan at x = 4.0 mm, z = 6.90 mm'),
-    ('0831_155627', 'z-scan at x = 4.0 mm, z = 6.70 mm'),
-    ('0831_155707', 'z-scan at x = 4.0 mm, z = 6.50 mm'),
-    ('0831_155757', 'z-scan at x = 4.0 mm, z = 6.30 mm'),
-    ('0831_162037', 'z-scan at x = 3.5 mm, z = 5.50 mm'),
-    ('0831_162127', 'z-scan at x = 4.0 mm, z = 5.50 mm'),
+    ('0831_153857', 'x = 4.00 mm, z = 6.30 mm'),
+    ('0831_154137', 'x = 4.00 mm, z = 6.15 mm'),
+    ('0831_154217', 'x = 4.00 mm, z = 6.00 mm'),
+    ('0831_154257', 'x = 4.00 mm, z = 5.85 mm'),
+    ('0831_154347', 'x = 4.00 mm, z = 5.70 mm'),
+    ('0831_154547', 'x = 3.65 mm, z = 6.30 mm'),
+    ('0831_154747', 'x = 3.50 mm, z = 6.90 mm'),
+    ('0831_154827', 'x = 3.50 mm, z = 6.70 mm'),
+    ('0831_154907', 'x = 3.50 mm, z = 6.50 mm'),
+    ('0831_154947', 'x = 3.50 mm, z = 6.30 mm'),
+    ('0831_155027', 'x = 3.50 mm, z = 6.00 mm'),
+    ('0831_155147', 'x = 3.50 mm, z = 5.70 mm'),
+    ('0831_155257', 'x = 3.20 mm, z = 6.30 mm'),
+    ('0831_155427', 'x = 4.50 mm, z = 6.30 mm'),
+    ('0831_155547', 'x = 4.00 mm, z = 6.90 mm'),
+    ('0831_155627', 'x = 4.00 mm, z = 6.70 mm'),
+    ('0831_155707', 'x = 4.00 mm, z = 6.50 mm'),
+    ('0831_155757', 'x = 4.00 mm, z = 6.30 mm'),
+    ('0831_162037', 'x = 3.50 mm, z = 5.50 mm'),
+    ('0831_162127', 'x = 4.00 mm, z = 5.50 mm'),
 ]
 
 
@@ -345,28 +344,39 @@ def test_the_script_makes_twenty_runs_named_after_the_start_in_time_order(make_s
         assert yaml.safe_load(yaml_of(out, label).read_text(encoding='utf-8'))['run_number'] == label
 
 
-def test_the_file_in_two_scans_is_one_run_with_both_conditions(make_sample_data, tmp_path):
+def test_every_run_is_a_different_file_with_one_position_in_one_format(make_sample_data, tmp_path):
     old_dir = fake_old_directory(make_sample_data, tmp_path / 'data')
-    make_sample_data.main(['--old-data-dir', str(old_dir), '--output-dir', str(tmp_path / 'sample')])
-    sources = [yaml.safe_load(p.read_text(encoding='utf-8'))['converted_from']['file']
-               for p in sorted((tmp_path / 'sample').glob('run_*/config/*.yaml'))]
-    assert len(sources) == len(set(sources)) == 20  # 9 + 7 + 5 entries, 21 patterns, one file twice
-    shared = yaml.safe_load(yaml_of(tmp_path / 'sample', '0831_154947').read_text(encoding='utf-8'))
-    assert shared['converted_from']['file'] == 'wf_260831_154947_49.50Hz.npz'
-    assert shared['condition'] == EXPECTED_RUNS[9][1]
+    out = tmp_path / 'sample'
+    make_sample_data.main(['--old-data-dir', str(old_dir), '--output-dir', str(out)])
+    documents = [yaml.safe_load(p.read_text(encoding='utf-8')) for p in sorted(out.glob('run_*/config/*.yaml'))]
+    assert len({d['converted_from']['file'] for d in documents}) == len(documents) == 20
+    for d in documents:  # the same text in the YAML, the summary and the README: no scan names, x then z
+        assert re.fullmatch(r'x = \d\.\d\d mm, z = \d\.\d\d mm', d['condition']), d['condition']
+    summary = (out / 'run_summary.txt').read_text(encoding='utf-8')
+    readme = (out / 'README.md').read_text(encoding='utf-8')
+    assert 'scan' not in summary and 'scan' not in readme  # (the word of the old condition text)
+    shared = yaml.safe_load(yaml_of(out, '0831_154947').read_text(encoding='utf-8'))
+    assert shared['converted_from']['file'] == 'wf_260831_154947_49.50Hz.npz'  # the file of two scans in the macro
+    assert shared['condition'] == 'x = 3.50 mm, z = 6.30 mm'
 
 
-def test_the_readme_lists_the_runs_and_the_caveats(make_sample_data, tmp_path):
+def test_the_readme_shows_the_table_and_how_to_use_it(make_sample_data, tmp_path):
     old_dir = fake_old_directory(make_sample_data, tmp_path / 'data')
     out = tmp_path / 'sample'
     make_sample_data.main(['--old-data-dir', str(old_dir), '--output-dir', str(out)])
     readme = (out / 'README.md').read_text(encoding='utf-8')
+    assert readme.count('<!--') == readme.count('-->') >= 1  # the parts that are not shown are closed comments
+    shown = re.sub(r'<!--.*?-->', '', readme, flags=re.S)  # what a reader of the README sees
     for label, condition in EXPECTED_RUNS:
-        assert f'| {label} | {condition} |' in readme
-    assert 'run_0831_155253/data/run0831_155253-00.npz' in readme  # the rule, with an example
-    assert 'UTC+9' in readme and '±1 秒' in readme and '測定 20 点' in readme
-    assert 'kidpack-monitor --data-dir sample_data --run-number 0831_153857' in readme
-    assert 'sample_data/run_0831_153857/data/run0831_153857-00.npz' in readme
+        assert f'| {label} | {condition} |' in shown
+    assert 'run_0831_155253/data/run0831_155253-00.npz' in shown  # the rule for the names, with an example
+    assert 'kidpack-monitor --data-dir sample_data --run-number 0831_153857' in shown
+    assert 'sample_data/run_0831_153857/data/run0831_153857-00.npz' in shown
+    # what is not shown (an HTML comment, to be shown again by deleting the two marks) is still there
+    hidden = ''.join(re.findall(r'<!--(.*?)-->', readme, flags=re.S))
+    assert '測定 20 点' in hidden and 'x = 3.20 ~ 4.50 mm' in hidden and 'z = 5.50 ~ 6.90 mm' in hidden
+    assert 'UTC+9' in hidden and '±1 秒' in hidden and '古い形式からの変更点' in hidden
+
 
 
 def test_the_runs_of_the_script_can_be_chosen_by_name_in_the_monitor(make_sample_data, tmp_path, capsys):
@@ -400,7 +410,7 @@ def test_a_partly_existing_output_is_refused_before_anything_is_written(make_sam
 
 
 def test_the_script_wants_exactly_one_file_per_pattern(make_sample_data, tmp_path):
-    first_pattern = make_sample_data.SCANS[0][2][0][0]
+    first_pattern = make_sample_data.FILES[0][0]
     missing = fake_old_directory(make_sample_data, tmp_path / 'a', skip=first_pattern)
     with pytest.raises(SystemExit, match=r'matches 0 files'):
         make_sample_data.main(['--old-data-dir', str(missing), '--output-dir', str(tmp_path / 'o1')])
@@ -409,3 +419,12 @@ def test_the_script_wants_exactly_one_file_per_pattern(make_sample_data, tmp_pat
     with pytest.raises(SystemExit, match=r'matches 2 files'):
         make_sample_data.main(['--old-data-dir', str(twice), '--output-dir', str(tmp_path / 'o2')])
     assert not (tmp_path / 'o1').exists() and not (tmp_path / 'o2').exists()
+
+
+def test_a_file_listed_twice_is_refused(make_sample_data, monkeypatch, tmp_path):
+    old_dir = fake_old_directory(make_sample_data, tmp_path / 'data')
+    pattern, x, z = make_sample_data.FILES[0]
+    monkeypatch.setattr(make_sample_data, 'FILES', [*make_sample_data.FILES, (pattern, x, z + 1)])
+    with pytest.raises(SystemExit, match='listed twice'):
+        make_sample_data.main(['--old-data-dir', str(old_dir), '--output-dir', str(tmp_path / 'o')])
+    assert not (tmp_path / 'o').exists()
