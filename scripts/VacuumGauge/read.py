@@ -1,11 +1,14 @@
-"""Log pressure from a Pfeiffer TPG 261 vacuum gauge to a CSV file.
+"""Log pressure from a Pfeiffer TPG 261 / 262 vacuum gauge to a CSV file.
 
 The gauge is expected to be in continuous output mode; every line it sends
-has the form ``status,value`` (e.g. ``0,1.2345E-03``). The pressure unit is
-whatever is configured on the gauge.
+has the form ``status,value`` (TPG 261, e.g. ``0,1.2345E-03``) or, for the two
+measuring channels of a TPG 262, ``status1,value1,status2,value2`` (e.g.
+``0, 4.65E+01,5, 0.0000E+0``: channel 1 reads, channel 2 has no sensor).
+``--channel`` chooses the channel that is logged (default 1). The pressure
+unit is whatever is configured on the gauge.
 
 Usage:
-    python read.py OUT.csv [PORT] [--interval SECONDS]
+    python read.py OUT.csv [PORT] [--interval SECONDS] [--channel {1,2}]
     python read.py --list-ports
 
 ``--list-ports`` shows the serial ports this Python can see (to find PORT).
@@ -44,18 +47,21 @@ STATUS_MESSAGES = {
 CSV_HEADER = ['timestamp', 'status', 'pressure']
 
 
-def parse_tpg261_data(raw_string):
-    """Parse one ``status,value`` line into ``(status, pressure)``.
+def parse_tpg261_data(raw_string, channel=1):
+    """Parse one line of the gauge into ``(status, pressure)`` of ``channel``.
 
-    ``pressure`` is a float when status is 0 (measurement OK) and None
-    otherwise. Returns None if the line is not in the expected format.
+    The line is ``status,value`` (one channel) or ``status1,value1,status2,value2``
+    (two channels). ``pressure`` is a float when status is 0 (measurement OK)
+    and None otherwise. Returns None if the line is not in the expected format,
+    or has no such channel.
     """
     parts = [p.strip() for p in raw_string.split(',')]
-    if len(parts) != 2:
+    if len(parts) not in (2, 4) or channel < 1 or channel * 2 > len(parts):
         return None
+    status_text_, value_text = parts[2 * channel - 2], parts[2 * channel - 1]
     try:
-        status = int(parts[0])
-        pressure = float(parts[1]) if status == 0 else None
+        status = int(status_text_)
+        pressure = float(value_text) if status == 0 else None
     except ValueError:
         return None
     return status, pressure
@@ -185,6 +191,8 @@ def main(argv=None):
                         help='serial port (default: COM3)')
     parser.add_argument('--interval', type=float, default=60.0,
                         help='seconds between CSV rows (default: 60)')
+    parser.add_argument('--channel', type=int, choices=(1, 2), default=1,
+                        help='measuring channel to log, for a gauge that sends two (default: 1)')
     parser.add_argument('--list-ports', action='store_true',
                         help='show the serial ports this Python can see and exit')
     args = parser.parse_args(argv)
@@ -207,11 +215,11 @@ def main(argv=None):
         for line in explain_open_failure(args.port, e):
             print(line)
         return 1
-    print(f'Connected to {args.port}. Reading data...')
+    print(f'Connected to {args.port} (channel {args.channel}). Writing one CSV row every {args.interval:g} s '
+          '(the first as soon as a reading arrives); Ctrl-C stops.')
 
     last_slot = None
-    last_data = time.monotonic()
-    no_data_warned = False
+    last_data = last_notice = time.monotonic()  # last valid reading / last "no data" warning
     n_unparsed = 0
     try:
         while True:
@@ -221,25 +229,26 @@ def main(argv=None):
                 print(f'Serial error: {e}')
                 ser.close()
                 ser = reconnect(args.port)
-                last_data = time.monotonic()
-                no_data_warned = False
+                last_data = last_notice = time.monotonic()
                 continue
 
             raw_str = response_bytes.decode('ascii', errors='ignore').strip()
-            result = parse_tpg261_data(raw_str) if raw_str else None
+            result = parse_tpg261_data(raw_str, args.channel) if raw_str else None
             if result is None:
                 if raw_str:
                     n_unparsed += 1
                     if n_unparsed <= MAX_UNPARSED_WARNINGS:
-                        print(f'Unrecognized line: {raw_str!r}')
-                if (not no_data_warned
-                        and time.monotonic() - last_data > NO_DATA_WARN_S):
-                    print(f'WARNING: no valid data for {NO_DATA_WARN_S} s')
-                    no_data_warned = True
+                        print(f'Unrecognized line: {response_bytes!r}')  # the bytes as received
+                    if n_unparsed == MAX_UNPARSED_WARNINGS:
+                        print('(further unrecognized lines are not shown)')
+                if time.monotonic() - last_notice > NO_DATA_WARN_S:  # again every NO_DATA_WARN_S
+                    last_notice = time.monotonic()
+                    print(f'WARNING: no valid data for {last_notice - last_data:.0f} s '
+                          f'({n_unparsed} unrecognized lines so far). Is the gauge sending '
+                          f'"status,value" lines continuously, and is the baud rate {BAUDRATE}?')
                 continue
 
-            last_data = time.monotonic()
-            no_data_warned = False
+            last_data = last_notice = time.monotonic()
             status, pressure = result
 
             now = datetime.now()

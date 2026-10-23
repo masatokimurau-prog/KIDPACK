@@ -38,6 +38,39 @@ def test_parse_invalid(read, raw):
     assert read.parse_tpg261_data(raw) is None
 
 
+# the two-channel line of a TPG 262: status1,value1,status2,value2 (the line that was seen on the real gauge)
+TWO_CHANNELS = '0, 4.65E+01,5, 0.0000E+0'
+
+
+@pytest.mark.parametrize('raw, channel, expected', [
+    (TWO_CHANNELS, 1, (0, 46.5)),                      # channel 1 reads
+    (TWO_CHANNELS, 2, (5, None)),                      # channel 2: no sensor
+    ('0,1.2000E-03,0,3.4000E+02', 1, (0, 1.2e-3)),
+    ('0,1.2000E-03,0,3.4000E+02', 2, (0, 3.4e2)),
+    ('4,0.0000E+00,0,5.0000E-05', 1, (4, None)),       # sensor off on channel 1, channel 2 is fine
+    ('4,0.0000E+00,0,5.0000E-05', 2, (0, 5e-5)),
+    ('0,1.2345E-03', 1, (0, 1.2345e-3)),               # a one-channel gauge still works
+])
+def test_parse_one_or_two_channels(read, raw, channel, expected):
+    assert read.parse_tpg261_data(raw, channel) == expected
+
+
+@pytest.mark.parametrize('raw, channel', [
+    ('0,1.2345E-03', 2),                # a one-channel line has no channel 2
+    ('0,1.0E-03,0', 1),                 # 3 fields
+    ('0,1.0E-03,0,1.0E-03,0,1.0E-03', 1),
+    ('x,1.0E-03,0,1.0E-03', 1), ('0,abc,0,1.0E-03', 1),
+    ('0,1.0E-03,x,1.0E-03', 2), ('0,1.0E-03,0,abc', 2),
+    (TWO_CHANNELS, 3), (TWO_CHANNELS, 0),
+])
+def test_parse_rejects_what_is_not_a_line_of_that_channel(read, raw, channel):
+    assert read.parse_tpg261_data(raw, channel) is None
+
+
+def test_the_default_channel_is_1(read):
+    assert read.parse_tpg261_data(TWO_CHANNELS) == (0, 46.5)
+
+
 def test_ensure_header_written_once(read, tmp_path):
     path = tmp_path / 'p.csv'
     read.ensure_header(path)
@@ -68,7 +101,7 @@ class SerialFailure:
 @pytest.fixture
 def run_main(read, tmp_path, monkeypatch):
     """Run main() against scripted events: (datetime, line) / SerialFailure / Interrupt."""
-    def run(events):
+    def run(events, *extra_args, csv_name='p.csv'):
         events = list(events)
         clock = {'now': None}
 
@@ -101,8 +134,8 @@ def run_main(read, tmp_path, monkeypatch):
         monkeypatch.setattr(read.serial, 'Serial', FakeSerial)
         monkeypatch.setattr(read, 'datetime', FakeDatetime)
         monkeypatch.setattr(read, 'RECONNECT_WAIT_S', 0)
-        path = tmp_path / 'p.csv'
-        assert read.main([str(path), 'FAKE']) == 0
+        path = tmp_path / csv_name
+        assert read.main([str(path), 'FAKE', *extra_args]) == 0
         return list(csv.reader(path.open())), FakeSerial.opened
     return run
 
@@ -264,3 +297,95 @@ def test_a_csv_name_is_still_required_without_list_ports(read, capsys):
     with pytest.raises(SystemExit) as exit_info:
         read.main([])
     assert exit_info.value.code == 2 and 'csv_name' in capsys.readouterr().err
+
+
+# --- what is printed while it runs ------------------------------------------
+
+def run_with_clock(read, monkeypatch, tmp_path, lines, interval=None):
+    """main() on scripted serial lines with a fake monotonic clock (3 s per readline, as the timeout)."""
+    lines = list(lines)
+    clock = {'mono': 1000.0}
+
+    class FakeSerial:
+        def __init__(self, **kwargs):
+            pass
+
+        def reset_input_buffer(self):
+            pass
+
+        def close(self):
+            pass
+
+        def readline(self):
+            if not lines:
+                raise KeyboardInterrupt
+            clock['mono'] += 3
+            return lines.pop(0)
+
+    monkeypatch.setattr(read.serial, 'Serial', FakeSerial)
+    monkeypatch.setattr(read.time, 'monotonic', lambda: clock['mono'])
+    monkeypatch.setattr(read.time, 'sleep', lambda s: None)
+    argv = [str(tmp_path / 'p.csv'), 'FAKE'] + ([] if interval is None else ['--interval', str(interval)])
+    assert read.main(argv) == 0
+
+
+def test_the_connect_message_says_how_often_a_row_is_written(read, monkeypatch, tmp_path, capsys):
+    run_with_clock(read, monkeypatch, tmp_path, [])
+    out = capsys.readouterr().out
+    assert 'Connected to FAKE (channel 1). Writing one CSV row every 60 s' in out and 'Ctrl-C' in out
+    run_with_clock(read, monkeypatch, tmp_path, [], interval=5)
+    assert 'Writing one CSV row every 5 s' in capsys.readouterr().out
+
+
+def test_without_data_the_warning_comes_again_and_again_with_the_time_and_a_hint(read, monkeypatch, tmp_path, capsys):
+    run_with_clock(read, monkeypatch, tmp_path, [b''] * 200)  # 600 s of silence
+    warnings = [line for line in capsys.readouterr().out.splitlines() if line.startswith('WARNING')]
+    assert len(warnings) == 4  # after 123 s, 246 s, 369 s, 492 s (not once and then nothing)
+    assert 'no valid data for 123 s' in warnings[0] and 'no valid data for 246 s' in warnings[1]
+    assert 'continuously' in warnings[0] and 'baud rate 9600' in warnings[0]
+
+
+def test_a_valid_reading_starts_the_silence_again(read, monkeypatch, tmp_path, capsys):
+    run_with_clock(read, monkeypatch, tmp_path, [b''] * 41 + [b'0,1.0000E-03\r\n'] + [b''] * 41)
+    warnings = [line for line in capsys.readouterr().out.splitlines() if line.startswith('WARNING')]
+    assert len(warnings) == 2  # 123 s of silence, a reading, 123 s again: not 246 s
+    assert all('no valid data for 123 s' in w for w in warnings)
+
+
+def test_unrecognized_lines_say_when_they_stop_being_shown(read, monkeypatch, tmp_path, capsys):
+    run_with_clock(read, monkeypatch, tmp_path, [b'hello\r\n'] * 6)
+    out = capsys.readouterr().out.splitlines()
+    kinds = ['shown' if line.startswith('Unrecognized line') else 'note' if line.startswith('(further') else 'other'
+             for line in out]
+    assert kinds.count('shown') == read.MAX_UNPARSED_WARNINGS == 3 and kinds.count('note') == 1
+    first_note = kinds.index('note')
+    assert kinds[first_note - 3:first_note] == ['shown'] * 3  # the note comes right after the third line
+
+
+def test_an_unrecognized_line_is_shown_as_the_bytes_that_were_received(read, monkeypatch, tmp_path, capsys):
+    # a wrong baud rate or parity gives bytes that are not ASCII: they must not be dropped from the message
+    run_with_clock(read, monkeypatch, tmp_path, [b'\xff\xfe0,1\x00\r\n', b'\x06\r\n'])
+    out = capsys.readouterr().out
+    assert "Unrecognized line: b'\\xff\\xfe0,1\\x00\\r\\n'" in out
+    assert "Unrecognized line: b'\\x06\\r\\n'" in out  # an ACK, and the line end is visible too
+
+
+def test_a_two_channel_gauge_is_logged_on_channel_1_by_default_and_on_channel_2_if_asked(run_main):
+    events = [
+        (t(0, 0, 100000), b'0, 4.65E+01,5, 0.0000E+0\r\n'),
+        (t(0, 30), b'0, 4.70E+01,5, 0.0000E+0\r\n'),   # same minute: skipped
+        (t(1, 0, 100000), b'0, 4.60E+01,0, 1.0000E-03\r\n'),
+        Interrupt(),
+    ]
+    rows, _ = run_main(events)
+    assert rows == [['timestamp', 'status', 'pressure'],
+                    ['2026-09-29T12:00:00', '0', '4.6500E+01'], ['2026-09-29T12:01:00', '0', '4.6000E+01']]
+    rows, _ = run_main(list(events), '--channel', '2', csv_name='channel2.csv')
+    assert rows == [['timestamp', 'status', 'pressure'],
+                    ['2026-09-29T12:00:00', '5', ''], ['2026-09-29T12:01:00', '0', '1.0000E-03']]
+
+
+def test_the_channel_must_be_1_or_2(read, tmp_path, capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        read.main([str(tmp_path / 'p.csv'), 'FAKE', '--channel', '3'])
+    assert exit_info.value.code == 2 and 'invalid choice' in capsys.readouterr().err
